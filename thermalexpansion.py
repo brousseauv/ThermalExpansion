@@ -21,8 +21,7 @@ cst = VariableContainer()
 cst.ha_to_ev = np.float(27.211396132)
 cst.ev_to_ha = np.float(1./cst.ha_to_ev)
 cst.kb_haK = 3.1668154267112283e-06 # Boltzmann constant
-cst.kb_evK = cst.kb_haK*cst.ha_to_ev
-print(cst.kb_evK)
+cst.tolx = -1E-16
 
 
 class HelmholtzFreeEnergy(object):
@@ -74,15 +73,14 @@ class HelmholtzFreeEnergy(object):
         for v in range(nvol):
 
             # Open OUTfile
-            self.gs = OutFile(out_flists[v])
+            gs = OutFile(out_flists[v])
 
             # get E
-            self.E = self.gs.etotal[0]
-            print(self.E)
+            E = gs.etotal[0]
 
             # initialize F_0, F_T 
             F_0 = 0.
-            F_T = 0.
+            F_T = np.zeros((self.ntemp))
 
             # for each qpt:
             for i in range(nqpt):
@@ -99,16 +97,60 @@ class HelmholtzFreeEnergy(object):
                     ddb.compute_dynmat(asr=True)
                 else:
                     ddb.compute_dynmat()
-                print(ddb.omega)
+                        ##### CHECK WITH GABRIEL IF I SHOULD HAVE LOTO SPLITTING AT GAMMA (WHERE DOES HIS CODE TREAT THE ELECTRIC FIELD PERTURBAITON IN THE DDB AT GAMMA???)
+
                 # get F0 contribution
+                F_0 += self.get_f0(ddb.omega) 
                 # get Ftherm contribution
-            
+                F_T += self.get_fthermal(ddb.omega,nmode)
+                
+            # Sum free energy = E + F_0 + F_T
+            free_energy[v,:,:] = (E+F_0)*np.ones((self.ntemp)) + F_T
+    
         # Check how many lattice parametersv are inequivalent and reduce matrices 
         # see EPC module, qptanalyser function get_se_indices and reduce_array
         # Minimize F
 
+    def get_f0(self,freq):
+
+        # F_0 = Sum (hbar omega)/2
+        return np.sum(freq)/2
+
+    def get_fthermal(self,freq,nmode):
+
+        # F_T = kbT Sum ln(1-e^(hbar omega/kbT)), where Zfactor = ln(1-e^(hbar omega/kbT))
+        Zfactor = np.zeros((nmode,self.ntemp))
+
+        for imode, omega in enumerate(freq):
+
+            Zfactor[imode,:] = self.get_Zfactor(omega) 
+
+        #Sum on modes
+        Zfactor = np.einsum('vt->t',Zfactor)
+
+        return cst.kb_haK*self.temperature*Zfactor
+
+    def get_Zfactor(self,omega):
+        
+        z = np.zeros(self.ntemp)
+
+        for t, T in enumerate(self.temperature):
+            
+            # Prevent dividing by 0
+            if T<1E-20 :
+                continue
+
+            x = -omega/(cst.kb_haK*T)
+            # prevent divergence of the log 
+            if x > cst.tolx:
+                continue
+
+            z[t] = np.log(1 - np.exp(x))
+        return z    
 
 
+            
+    
 # Also, add a check with the vibrational free energy formula from the book, and check that it is the same as abinit's output...
 
 # get the DDB from text? how does it come out from anaddb ? I would prefer to work with netcdf files...
