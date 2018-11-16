@@ -89,6 +89,19 @@ class FreeEnergy(object):
         for t,T in enumerate(self.temperature):
             #print('T = {:>3d}K : F_0+F_T = {: 13.11e} J/molc'.format(T,x[t]))
             print('T = {:>3d}K : F_0+F_T = {: 13.11e} J/molc = {: 13.11e} Ha'.format(T,x[t],f0+ft[t]))
+
+    def reduce_acell(self,acell):
+        # Check which lattice parameter are independent
+        x = np.ones((3))*acell[0]
+        check = np.isclose(acell,x)
+
+        arr = [0]
+        for i in range(2):
+            if not check[i+1]:
+                arr.append[i+1]
+
+        return arr 
+    
  
 class HelmholtzFreeEnergy(FreeEnergy):
 
@@ -158,12 +171,21 @@ class HelmholtzFreeEnergy(FreeEnergy):
             self.volume[v,0] = gs.volume
             self.volume[v,1:] = gs.acell
 
+            # Check how many lattice parametersv are inequivalent and reduce matrices 
+            # see EPC module, qptanalyser function get_se_indices and reduce_array
+            # I do the acell equivalence check only one. There should be no need to check this, as all datasets must describe the same material!
+
+        # what would be the right atol (absolute tolerance) for 2 equivalent lattice parameters? 1E-4, is it too loose?
+            if v==0:
+                self.distinct_acell = self.reduce_acell(self.volume[v,1:])
             # get E
             E = gs.etotal[0]
 
             # initialize F_0, F_T 
             F_0 = 0.
             F_T = np.zeros((self.ntemp))
+
+            # Add entropy term?? 
 
             # for each qpt:
             for i in range(nqpt):
@@ -194,18 +216,18 @@ class HelmholtzFreeEnergy(FreeEnergy):
             # Convert results in J/mol-cell, to compare with anaddb output
             self.ha2molc(F_0,F_T)
 
-           
-    
-        # Check how many lattice parametersv are inequivalent and reduce matrices 
-        # Add entropy term?? 
-        # see EPC module, qptanalyser function get_se_indices and reduce_array
         # Minimize F
+        #Here, I have F[nvol,T] and also the detailed acell for each volume
+        #But I do not have a very detailed free energy surface. I should interpolate it on a finer mesh, give a model function? 
+        # For Helmholtz, what is usually done is to fit the discrete F(V,T) = F(a,T), F(b,T), F(c,T)... (each separately) with a parabola, one I have the fitting parameters I can
+            # easily get the parabola's minimum.
+
+        # To check the results, add the fitting parameters in the output file. So the fitting can be plotted afterwards.
+
+        # I will have to think about what to do when there is also pressure... do I just use a paraboloid for fitting and minimizing?
 
 
-# get total E, total vibrational energy for each P,T,V(a,b,c)... write the code in a general way, so it can work with any symmetry
-# minimize G as a function of a/b/c to get the equilibrium lattice parameters
-
-# add a function to get the grüneisen mode parameters
+# add a function to get the grüneisen mode parameters. This will require to store the frequencies for computation after all volumes have been read and analysed.
 
 
 
