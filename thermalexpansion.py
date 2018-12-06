@@ -119,6 +119,7 @@ class HelmholtzFreeEnergy(FreeEnergy):
 
         rootname,
         units,
+        symmetry,
 
         ddb_flists = None,
         out_flists = None,
@@ -144,6 +145,9 @@ class HelmholtzFreeEnergy(FreeEnergy):
         #Set input files
         self.ddb_flists = ddb_flists
         self.out_flists = out_flists
+        self.symmetry = symmetry
+        if not self.symmetry:
+            raise Exception('Symmetry type must be specified')
 
         super(HelmholtzFreeEnergy,self).__init__(rootname,units)
         self.check_anaddb = check_anaddb
@@ -154,6 +158,7 @@ class HelmholtzFreeEnergy(FreeEnergy):
         # set parameter space dimensions
         nvol, nqpt = np.shape(self.ddb_flists)
         self.free_energy = np.zeros((nvol,self.ntemp))
+
         self.volume = np.empty((nvol,4)) # 1st index = data index, 2nd index : total cell volume, (a1,a2,a3)
 
         # Check that all qpt lists have the same lenght, and that it is equal to the number of wtq
@@ -166,7 +171,7 @@ class HelmholtzFreeEnergy(FreeEnergy):
         # Loop on all volumes
         for v in range(nvol):
 
-            # Open OUTfile
+           # Open OUTfile
             gs = OutFile(out_flists[v])
             self.volume[v,0] = gs.volume
             self.volume[v,1:] = gs.acell
@@ -176,10 +181,11 @@ class HelmholtzFreeEnergy(FreeEnergy):
             # I do the acell equivalence check only one. There should be no need to check this, as all datasets must describe the same material!
 
         # what would be the right atol (absolute tolerance) for 2 equivalent lattice parameters? 1E-4, is it too loose?
-            if v==0:
+            if v==0: # REDONDANT SI JE SPECIFIE EXPLICITEMENT LE TYPE DE SYMETRIE... IL VA FALLOIR FAIRE LES 7 GROUPES ?? 
                 self.distinct_acell = self.reduce_acell(self.volume[v,1:])
             # get E
             E = gs.etotal[0]
+            print(E)
 
             # initialize F_0, F_T 
             F_0 = 0.
@@ -205,7 +211,7 @@ class HelmholtzFreeEnergy(FreeEnergy):
                         ##### CHECK WITH GABRIEL IF I SHOULD HAVE LOTO SPLITTING AT GAMMA (WHERE DOES HIS CODE TREAT THE ELECTRIC FIELD PERTURBAITON IN THE DDB AT GAMMA???)
 
                 # get F0 contribution
-                F_0 += self.wtq[i]*self.get_f0(ddb.omega) 
+                #F_0 += self.wtq[i]*self.get_f0(ddb.omega) 
                 # get Ftherm contribution
                 F_T += self.wtq[i]*self.get_fthermal(ddb.omega,nmode)
                 
@@ -225,11 +231,37 @@ class HelmholtzFreeEnergy(FreeEnergy):
         # To check the results, add the fitting parameters in the output file. So the fitting can be plotted afterwards.
 
         # I will have to think about what to do when there is also pressure... do I just use a paraboloid for fitting and minimizing?
+        # That would be the main idea. If there is 1 independent acell, it is a parabola (x^2), if there are 2 it is a paraboloid (x^2 + y^2), if there are 3 it would be a paraboloic "volume" (x^2 +
+        # y^2 + z^2)
+        
+        # Minimize F, according to crystal symmetry
+        self.minimize_free_energy()
 
 
 # add a function to get the grüneisen mode parameters. This will require to store the frequencies for computation after all volumes have been read and analysed.
+# for the Gruneisen, I need the derivative od the frequencies vs volume.
 
+    def minimize_free_energy(self):
 
+        import matplotlib.pyplot as plt
+
+        if self.symmetry == 'cubic':
+            
+            fit = np.zeros((self.ntemp))
+
+            print(self.free_energy)
+            print(self.volume)
+            for t, T in enumerate(self.temperature):
+                afit = np.polyfit(self.volume[:,1],self.free_energy[:,t],2)
+                fit[t] = -afit[1]/(2*afit[0])
+
+                xfit = np.linspace(9.50,12.0,100)
+                yfit = afit[0]*xfit**2 + afit[1]*xfit + afit[2]
+                #print(self.volume)
+                plt.plot(self.volume[:,1],self.free_energy[:,t],marker='o')
+                plt.plot(xfit,yfit)
+            #print(fit)
+            plt.show()
 
 class GibbsFreeEnergy(object):
 
@@ -313,6 +345,7 @@ def compute(
         gibbs = False, # Default value is Helmoltz free energy, at P=0 (or, at constant P)
         check_anaddb = False,
         units = 'eV',
+        symmetry = None,
 
         **kwargs):
 
@@ -323,6 +356,7 @@ def compute(
                 ddb_flists = ddb_flists,
     
                 rootname = rootname,
+                symmetry = symmetry,
     
                 wtq = wtq,
                 temperature = temperature,
@@ -337,6 +371,7 @@ def compute(
                 ddb_flists = ddb_flists,
     
                 rootname = rootname,
+                symmetry = symmetry,
     
                 wtq = wtq,
                 temperature = temperature,
