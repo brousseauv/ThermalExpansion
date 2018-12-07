@@ -23,6 +23,7 @@ cst.ev_to_ha = np.float(1./cst.ha_to_ev)
 cst.kb_haK = 3.1668154267112283e-06 # Boltzmann constant
 cst.Na = 6.022140857E23
 cst.ev_to_j = 1.60217657E-19
+cst.gpa_to_habo3 = 1./29421.033
 cst.tolx = 1E-16
 
 class FreeEnergy(object):
@@ -183,9 +184,11 @@ class HelmholtzFreeEnergy(FreeEnergy):
         # what would be the right atol (absolute tolerance) for 2 equivalent lattice parameters? 1E-4, is it too loose?
             if v==0: # REDONDANT SI JE SPECIFIE EXPLICITEMENT LE TYPE DE SYMETRIE... IL VA FALLOIR FAIRE LES 7 GROUPES ?? 
                 self.distinct_acell = self.reduce_acell(self.volume[v,1:])
+                nmode = 3*gs.natom
+                self.omega = np.zeros((nvol,nqpt,nmode))
+
             # get E
             E = gs.etotal[0]
-            print(E)
 
             # initialize F_0, F_T 
             F_0 = 0.
@@ -198,7 +201,7 @@ class HelmholtzFreeEnergy(FreeEnergy):
 
                 # open the ddb file
                 ddb = DdbFile(self.ddb_flists[v][i])
-                nmode = 3*ddb.natom
+                #nmode = 3*ddb.natom
 
                 # Check if qpt is Gamma
                 is_gamma = ddb.is_gamma
@@ -210,8 +213,10 @@ class HelmholtzFreeEnergy(FreeEnergy):
                     ddb.compute_dynmat()
                         ##### CHECK WITH GABRIEL IF I SHOULD HAVE LOTO SPLITTING AT GAMMA (WHERE DOES HIS CODE TREAT THE ELECTRIC FIELD PERTURBAITON IN THE DDB AT GAMMA???)
 
+                # Store frequencies for Gruneisen parameters
+                self.omega[v,i,:] = ddb.omega
                 # get F0 contribution
-                #F_0 += self.wtq[i]*self.get_f0(ddb.omega) 
+                F_0 += self.wtq[i]*self.get_f0(ddb.omega) 
                 # get Ftherm contribution
                 F_T += self.wtq[i]*self.get_fthermal(ddb.omega,nmode)
                 
@@ -236,32 +241,68 @@ class HelmholtzFreeEnergy(FreeEnergy):
         
         # Minimize F, according to crystal symmetry
         self.minimize_free_energy()
-
+        self.get_gruneisen(nqpt,nmode)
 
 # add a function to get the grüneisen mode parameters. This will require to store the frequencies for computation after all volumes have been read and analysed.
 # for the Gruneisen, I need the derivative od the frequencies vs volume.
 
     def minimize_free_energy(self):
 
-        import matplotlib.pyplot as plt
+        plot = False
 
+        if plot:
+            import matplotlib.pyplot as plt
+        
         if self.symmetry == 'cubic':
             
             fit = np.zeros((self.ntemp))
 
-            print(self.free_energy)
-            print(self.volume)
+            #print(self.free_energy)
+            #print(self.volume)
             for t, T in enumerate(self.temperature):
                 afit = np.polyfit(self.volume[:,1],self.free_energy[:,t],2)
                 fit[t] = -afit[1]/(2*afit[0])
 
-                xfit = np.linspace(9.50,12.0,100)
-                yfit = afit[0]*xfit**2 + afit[1]*xfit + afit[2]
-                #print(self.volume)
-                plt.plot(self.volume[:,1],self.free_energy[:,t],marker='o')
-                plt.plot(xfit,yfit)
-            #print(fit)
-            plt.show()
+                if plot:
+                    xfit = np.linspace(9.50,12.0,100)
+                    yfit = afit[0]*xfit**2 + afit[1]*xfit + afit[2]
+                    #print(self.volume)
+                    plt.plot(self.volume[:,1],self.free_energy[:,t],marker='o')
+                    plt.plot(xfit,yfit)
+            print(fit)
+            if plot:
+                plt.show()
+
+    def get_gruneisen(self, nqpt, nmode):
+
+        plot = True
+
+        if plot :
+            import matplotlib.pyplot as plt
+
+        if self.symmetry == 'cubic':
+            
+            gru = np.zeros((nqpt,nmode))
+
+            for q,v in itt.product(range(nqpt),range(nmode)):
+
+                if q == 0:
+                gru[q,v] = -1*np.polyfit(np.log(self.volume[:,1]), np.log(self.omega[:,q,v]),1)[0]
+           
+            if plot:
+                for c in range(1): 
+                    for i in range(nmode/2):
+                        plt.plot(np.log(self.volume[:,1]),np.log(self.omega[:,c,i]),marker='x')
+                        plt.xlabel('ln V')
+                        plt.ylabel('ln omega')
+
+                plt.show()
+
+            #print(gru)
+            
+            
+            
+
 
 class GibbsFreeEnergy(object):
 
