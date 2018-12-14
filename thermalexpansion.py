@@ -25,6 +25,7 @@ cst.Na = 6.022140857E23
 cst.ev_to_j = 1.60217657E-19
 cst.gpa_to_habo3 = 1./29421.033
 cst.tolx = 1E-16
+cst.me_amu = 5.4857990965007152E-4 #electron mass in atomic mass units
 
 class FreeEnergy(object):
 
@@ -130,6 +131,9 @@ class HelmholtzFreeEnergy(FreeEnergy):
 
         check_anaddb = False,
 
+        bulk_modulus = None,
+        bulk_modulus_units = None,
+
         **kwargs):
 
 
@@ -156,9 +160,17 @@ class HelmholtzFreeEnergy(FreeEnergy):
         self.temperature = temperature
         self.ntemp = len(self.temperature) 
 
+        if bulk_modulus_units == 'GPa':
+            self.bulk_modulus = bulk_modulus*cst.gpa_to_habo3
+        elif bulk_modulus_units == 'HaBo3':
+            self.bulk_modulus = bulk_modulus
+        else:
+            raise Exception('Bulk modulus units must be GPa or Ha/bohr^3')
+
         # set parameter space dimensions
         nvol, nqpt = np.shape(self.ddb_flists)
         self.free_energy = np.zeros((nvol,self.ntemp))
+        self.qred = np.zeros((nqpt,3))
 
         self.volume = np.empty((nvol,4)) # 1st index = data index, 2nd index : total cell volume, (a1,a2,a3)
 
@@ -185,6 +197,7 @@ class HelmholtzFreeEnergy(FreeEnergy):
             if v==0: # REDONDANT SI JE SPECIFIE EXPLICITEMENT LE TYPE DE SYMETRIE... IL VA FALLOIR FAIRE LES 7 GROUPES ?? 
                 self.distinct_acell = self.reduce_acell(self.volume[v,1:])
                 nmode = 3*gs.natom
+                self.natom = gs.natom
                 self.omega = np.zeros((nvol,nqpt,nmode))
 
             # get E
@@ -201,6 +214,8 @@ class HelmholtzFreeEnergy(FreeEnergy):
 
                 # open the ddb file
                 ddb = DdbFile(self.ddb_flists[v][i])
+                if  v==0:
+                    self.qred[i,:] = ddb.qred
                 #nmode = 3*ddb.natom
 
                 # Check if qpt is Gamma
@@ -240,9 +255,11 @@ class HelmholtzFreeEnergy(FreeEnergy):
         # y^2 + z^2)
         
         # Minimize F, according to crystal symmetry
-        self.minimize_free_energy()
-        self.get_gruneisen(nqpt,nmode)
-
+        #self.temperature_dependent_acell = self.minimize_free_energy()
+        self.gruneisen = self.get_gruneisen(nqpt,nmode,nvol)
+        self.acell_via_gruneisen = self.get_acell(nqpt,nmode)
+        print(self.acell_via_gruneisen)
+        
 # add a function to get the grüneisen mode parameters. This will require to store the frequencies for computation after all volumes have been read and analysed.
 # for the Gruneisen, I need the derivative od the frequencies vs volume.
 
@@ -269,16 +286,19 @@ class HelmholtzFreeEnergy(FreeEnergy):
                     #print(self.volume)
                     plt.plot(self.volume[:,1],self.free_energy[:,t],marker='o')
                     plt.plot(xfit,yfit)
-            print(fit)
+
             if plot:
                 plt.show()
 
-    def get_gruneisen(self, nqpt, nmode):
+        return fit
 
-        plot = True
+    def get_gruneisen(self, nqpt, nmode,nvol):
+
+        plot = False
 
         if plot :
             import matplotlib.pyplot as plt
+            fig,arr = plt.subplots(1,2,figsize = (12,6), sharey = False,squeeze=False)
 
         if self.symmetry == 'cubic':
             
@@ -286,21 +306,169 @@ class HelmholtzFreeEnergy(FreeEnergy):
 
             for q,v in itt.product(range(nqpt),range(nmode)):
 
-                if q == 0:
-                gru[q,v] = -1*np.polyfit(np.log(self.volume[:,1]), np.log(self.omega[:,q,v]),1)[0]
-           
-            if plot:
-                for c in range(1): 
-                    for i in range(nmode/2):
-                        plt.plot(np.log(self.volume[:,1]),np.log(self.omega[:,c,i]),marker='x')
-                        plt.xlabel('ln V')
-                        plt.ylabel('ln omega')
+                if q==0 and v<3:
+                # put Gruneisen at zero for acoustic modes at Gamma
+                    gru[q,v] = 0
+                else:
+                    gru[q,v] = -1*np.polyfit(np.log(self.volume[:,1]), np.log(self.omega[:,q,v]),1)[0]
+               
+            # correct divergence at q-->0
+            # this would extrapolate Gruneisen at q=0 from neighboring qpts
+            #x = [np.linalg.norm(self.qred[1,:]),np.linalg.norm(self.qred[2,:])]
+            #for v in range(3):
+            #    y = [gru[1,v],gru[2,v]]
+            #    gru[0,v] = np.polyfit(x,y,1)[1]
+            
+            #gru2 = self.gruneisen_from_dynmat(nqpt,nmode,nvol)
+
+            #print('slope')
+            #print('delta omega {}'.format(self.omega[2,1,:]-self.omega[0,1,:]))
+            #print('omega0 {}'.format(self.omega[1,1,:]))
+            #print('gruneisen {}'.format(gru[1,:]))
+ 
+            if plot :
+                #x = np.array([1,2,3])
+                #x = [np.linalg.norm(self.qred[0,:]),np.linalg.norm(self.qred[1,:]),np.linalg.norm(self.qred[2,:]),np.linalg.norm(self.qred[3,:])]
+                #for v in range(nmode):
+                #    plt.plot(x,gru[:4,:],marker='o')
+                
+                # plot mode Gruneisen vs frequency
+                col = ['red','orange','yellow','green','blue','purple']
+                for v in range(nmode):
+                    arr[0][0].plot(self.omega[1,:,v]*cst.ha_to_ev*1000,gru[:,v],color=col[v],marker = 'o',linestyle='None')
+                    arr[0][0].set_xlabel('Frequency (meV)')
+                    arr[0][0].set_ylabel('Mode Gruneisen')
+
+                    arr[0][1].plot(self.omega[1,:,v]*cst.ha_to_ev*1000,gru2[:,v],color=col[v],marker = 'o',linestyle='None')
+                    arr[0][1].set_xlabel('Frequency (meV)')
+                    arr[0][1].set_ylabel('Mode Gruneisen')
+    
+#            if plot:
+#                for c in range(nqpt): 
+#                    for i in range(nmode/2):
+#                        plt.plot(np.log(self.volume[:,1]),np.log(self.omega[:,c,i]),marker='x')
+#                        plt.xlabel('ln V')
+#                        plt.ylabel('ln omega')
 
                 plt.show()
 
-            #print(gru)
+            return gru 
+            
+    def get_acell(self, nqpt, nmode):
+
+        # Evaluate acell(T) from Gruneisen parameters
+        if self.symmetry == 'cubic':
+            
+            plot = True
+            # First, get alpha(T)
+            x = np.zeros((nqpt,nmode,self.ntemp)) # q,v,t
+            for t in range(self.ntemp):
+                x[:,:,t] = self.omega[1,:,:]/(cst.kb_haK*self.temperature[t])
+            cv = cst.kb_haK*x**2*np.exp(x)/(np.exp(x)-1)**2
+            bose = 1./(np.exp(x)-1)
+            bose[0,:3,:] = 0 # Check what Gabriel did)
+            hwt = np.einsum('qv,qvt->qvt',self.omega[1,:,:],bose)
+            # fix this properly later!!! 
+            cv[0,:3,:] = 0
+
+            alpha = np.einsum('q,qvt,qv->t',self.wtq,cv,self.gruneisen)/(self.volume[1,0]*self.bulk_modulus)
+
+            # Then, get a(T)
+            integral = 1./(self.bulk_modulus*self.volume[1,0])*np.einsum('q,qvt,qv->t',self.wtq,hwt,self.gruneisen)
+            a = self.volume[1,1]*(integral + 1)
+
+            if plot:
+                import matplotlib.pyplot as plt
+                plt.plot(self.temperature,alpha*1E6) 
+                plt.show() 
             
             
+            return a
+    def gruneisen_from_dynmat(self,nqpt,nmode,nvol):
+
+        # This computes the gruneisen parameters from the change in the dynamical matrix
+        # like phonopy and anaddb
+            
+        # for now, I reopen all files, but later on change the loop ordering (anyway, it should not do everything linearly, but rather use functions depending of input parameters
+
+        gru = np.zeros((nqpt,nmode))
+        dplus =  2
+        d0 = 1
+        dminus = 0 # put this in a function
+        dV = self.volume[dplus,1] - self.volume[dminus,1]
+        V0 = self.volume[d0,1]
+
+        for i in range(nqpt):
+            dD = np.zeros((nmode,nmode),dtype=complex)
+            for v in range(nvol):
+
+                # open the ddb file
+                ddb = DdbFile(self.ddb_flists[v][i])
+
+                # Check if qpt is Gamma
+                is_gamma = ddb.is_gamma
+
+                # this is taken from Gabriel's code, directly. for testing purposes.
+                amu = np.zeros(ddb.natom)
+                for ii in np.arange(ddb.natom):
+    
+                    jj = ddb.typat[ii]
+                    amu[ii] = ddb.amu[jj-1]
+
+                dynmat = ddb.get_mass_scaled_dynmat_cart()
+
+                if v==dplus:
+                    dD += dynmat
+                if v==dminus:
+                    dD -= dynmat
+                if v==d0:
+                    eigval, eigvect = np.linalg.eigh(dynmat)
+
+                    for ii in np.arange(ddb.natom):
+                        for dir1 in np.arange(3):
+                            ipert = ii*3 + dir1
+                            eigvect[ipert] = eigvect[ipert]*np.sqrt(cst.me_amu/amu[ii])
+                    
+                    if is_gamma:
+                        eigval[0] = 0.0
+                        eigval[1] = 0.0
+                        eigval[2] = 0.0
+
+                    for ieig,eig in enumerate(eigval):
+                        if eig < 0.0:
+                            warnings.warn('Negative eigenvalue changed to 0')
+                            eigval[ieig] = 0.0
+            #if i==1:
+            #    print(dD)
+            dD_at_q = []
+            
+            for eig in eigvect:
+
+                dD_at_q.append(np.vdot(np.transpose(eig), np.dot(dD,eig)).real)   
+#                if i==1:
+                #    print(eig)
+               #     print(np.dot(dD,eig))
+                    #print(dD_at_q)
+                    
+
+            dD_at_q = np.array(dD_at_q)
+
+            for v in range(nmode):
+                if i==0 and v<3:
+                    gru[i,v] = 0
+                else:
+                    gru[i,v] = -V0*dD_at_q[v]/(2*eigval[v].real*dV)
+            if i==1:
+
+                print('Dynamical matrix')
+                print('delta omega^2 {}'.format(dD_at_q))
+                print('omega0 {}'.format(eigval[:]))
+                print('gruneisen {}'.format(gru[i,:]))
+
+
+        return gru
+
+
             
 
 
@@ -387,6 +555,8 @@ def compute(
         check_anaddb = False,
         units = 'eV',
         symmetry = None,
+        bulk_modulus = None,
+        bulk_modulus_units = None,
 
         **kwargs):
 
@@ -403,6 +573,10 @@ def compute(
                 temperature = temperature,
                 units = units,
                 check_anaddb = check_anaddb,
+                
+                bulk_modulus = bulk_modulus,
+                bulk_modulus_units = bulk_modulus_units,
+
     
                 **kwargs)
  
@@ -419,6 +593,9 @@ def compute(
                 units = units,
                 check_anaddb = check_anaddb,
     
+                bulk_modulus = bulk_modulus,
+                bulk_modulus_units = bulk_modulus_units,
+
                 **kwargs)
     
 
