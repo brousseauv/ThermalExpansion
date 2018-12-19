@@ -13,6 +13,10 @@ import itertools as itt
 from ElectronPhononCoupling import DdbFile
 from outfile import OutFile
 
+from matplotlib import rc
+rc('text', usetex = True)
+rc('font', family = 'serif', weight = 'bold')
+
 ###################################
 
 class VariableContainer:pass
@@ -258,7 +262,7 @@ class HelmholtzFreeEnergy(FreeEnergy):
         #self.temperature_dependent_acell = self.minimize_free_energy()
         self.gruneisen = self.get_gruneisen(nqpt,nmode,nvol)
         self.acell_via_gruneisen = self.get_acell(nqpt,nmode)
-        print(self.acell_via_gruneisen)
+        print(self.volume[:,0])
         
 # add a function to get the grüneisen mode parameters. This will require to store the frequencies for computation after all volumes have been read and analysed.
 # for the Gruneisen, I need the derivative od the frequencies vs volume.
@@ -294,7 +298,7 @@ class HelmholtzFreeEnergy(FreeEnergy):
 
     def get_gruneisen(self, nqpt, nmode,nvol):
 
-        plot = False
+        plot = True 
 
         if plot :
             import matplotlib.pyplot as plt
@@ -319,7 +323,8 @@ class HelmholtzFreeEnergy(FreeEnergy):
             #    y = [gru[1,v],gru[2,v]]
             #    gru[0,v] = np.polyfit(x,y,1)[1]
             
-            #gru2 = self.gruneisen_from_dynmat(nqpt,nmode,nvol)
+            gru2 = self.gruneisen_from_dynmat(nqpt,nmode,nvol)
+            self.gru2 = gru2
 
             #print('slope')
             #print('delta omega {}'.format(self.omega[2,1,:]-self.omega[0,1,:]))
@@ -342,7 +347,12 @@ class HelmholtzFreeEnergy(FreeEnergy):
                     arr[0][1].plot(self.omega[1,:,v]*cst.ha_to_ev*1000,gru2[:,v],color=col[v],marker = 'o',linestyle='None')
                     arr[0][1].set_xlabel('Frequency (meV)')
                     arr[0][1].set_ylabel('Mode Gruneisen')
-    
+                    arr[0][0].set_title(r'Slope ln$\omega$ vs lnV') 
+                    arr[0][1].set_title(r'Dynamical matrix') 
+                    arr[0][0].plot(self.omega[1,0,v]*cst.ha_to_ev*1000,gru[0,v],marker='d',color='black',linestyle='None')
+                    arr[0][0].plot(self.omega[1,16,v]*cst.ha_to_ev*1000,gru[16,v],marker='s',color='black',linestyle='None')
+
+
 #            if plot:
 #                for c in range(nqpt): 
 #                    for i in range(nmode/2):
@@ -350,6 +360,7 @@ class HelmholtzFreeEnergy(FreeEnergy):
 #                        plt.xlabel('ln V')
 #                        plt.ylabel('ln omega')
 
+                plt.savefig('gruneisen_GaAs2.png')
                 plt.show()
 
             return gru 
@@ -359,7 +370,7 @@ class HelmholtzFreeEnergy(FreeEnergy):
         # Evaluate acell(T) from Gruneisen parameters
         if self.symmetry == 'cubic':
             
-            plot = True
+            plot = False
             # First, get alpha(T)
             x = np.zeros((nqpt,nmode,self.ntemp)) # q,v,t
             for t in range(self.ntemp):
@@ -372,6 +383,7 @@ class HelmholtzFreeEnergy(FreeEnergy):
             cv[0,:3,:] = 0
 
             alpha = np.einsum('q,qvt,qv->t',self.wtq,cv,self.gruneisen)/(self.volume[1,0]*self.bulk_modulus)
+            alpha2 = np.einsum('q,qvt,qv->t',self.wtq,cv,self.gru2)/(self.volume[1,0]*self.bulk_modulus)
 
             # Then, get a(T)
             integral = 1./(self.bulk_modulus*self.volume[1,0])*np.einsum('q,qvt,qv->t',self.wtq,hwt,self.gruneisen)
@@ -379,7 +391,17 @@ class HelmholtzFreeEnergy(FreeEnergy):
 
             if plot:
                 import matplotlib.pyplot as plt
-                plt.plot(self.temperature,alpha*1E6) 
+                fig,arr = plt.subplots(1,2,figsize=(15,5),sharey=False)
+                arr[0].plot(self.temperature,alpha*1E6) 
+                arr[1].plot(self.temperature,alpha2*1E6) 
+                arr[0].set_ylabel(r'$\alpha$ ($10^{-6}$ K$^{-1}$)')
+                arr[0].set_xlabel(r'Temperature (K)')
+                arr[1].set_xlabel(r'Temperature (K)')
+                arr[0].set_title(r'Slope ln$\omega$ vs lnV') 
+                arr[1].set_title(r'Dynamical matrix') 
+
+
+                plt.savefig('alpha_GaAs.png')
                 plt.show() 
             
             
