@@ -4,14 +4,21 @@
 # Author:  Veronique Brousseau-Couture <veronique.brousseauc@gmail.com>
 
 import numpy as np
+from scipy.optimize import curve_fit
 import os
 import sys
 import netCDF4 as nc
 import warnings
 import itertools as itt
+import matplotlib.pyplot as plt
+import constants as cst
+
 
 from ElectronPhononCoupling import DdbFile
 from outfile import OutFile
+from gsrfile import GsrFile
+from gapfile import GapFile
+import eos as eos
 
 from matplotlib import rc
 rc('text', usetex = True)
@@ -19,17 +26,8 @@ rc('font', family = 'serif', weight = 'bold')
 
 ###################################
 
-class VariableContainer:pass
     
-cst = VariableContainer()
-cst.ha_to_ev = np.float(27.211396132)
-cst.ev_to_ha = np.float(1./cst.ha_to_ev)
-cst.kb_haK = 3.1668154267112283e-06 # Boltzmann constant
-cst.Na = 6.022140857E23
-cst.ev_to_j = 1.60217657E-19
-cst.gpa_to_habo3 = 1./29421.033
-cst.tolx = 1E-16
-cst.me_amu = 5.4857990965007152E-4 #electron mass in atomic mass units
+tolx = 1E-16
 
 class FreeEnergy(object):
 
@@ -547,6 +545,94 @@ class GibbsFreeEnergy(object):
             # Check how many lattice parametersv are inequivalent and reduce matrices
             # Minimize G
 
+class Static(object):
+
+    def __init__(self,
+
+            rootname = 'static.out',
+            units = 'eV',
+
+            dedp = False,
+        
+            etotal_flist = None,
+            gap_fname = None,             
+            initial_params = None,
+
+            **kwargs):
+
+        self.rootname = rootname
+        self.units = units
+        self.etotal_flist = etotal_flist
+        self.gap_fname = gap_fname
+        self.dedp = dedp
+        self.initial_params = initial_params
+
+
+        # Data check
+        if not self.etotal_flist:
+            raise Exception('Must provide a list of _GSR.nc files containing total energy')
+        if not self.gap_fname:
+            raise Exception('Must provide a netCDF file containing gap energies. Please use netcdf_gap.py') 
+
+        
+        self.nfile = len(self.etotal_flist)
+
+        self.etotal = np.empty((self.nfile))
+        self.gap_energy = np.empty((self.nfile))
+        self.volume = np.empty((self.nfile))
+
+        gap = GapFile(self.gap_fname)
+        self.gap_energy = gap.gap_energy
+        if len(self.gap_energy) != self.nfile:
+            raise Exception('{} contains {} gap values, while there are {} files in etotal_flist. '.format(self.gap_fname, self.nfile, len(self.gap_energy)))
+
+        for n, fname in enumerate(self.etotal_flist):
+
+            gs = GsrFile(fname)
+            self.etotal[n] = gs.etotal
+            self.volume[n] = gs.volume
+
+
+        self.bulk_modulus, self.bulk_modulus_derivative, self.equilibrium_volume =  self.get_bulk_modulus()
+
+        if self.dedp:
+    
+            self.dedp = self.get_dedp()
+
+
+    def get_bulk_modulus(self):
+
+        plot = False
+        
+        if self.initial_params:
+            p0 = self.initial_params
+            popt,pcov = curve_fit(eos.murnaghan_EV, self.volume, self.etotal, p0)  
+
+        else:
+            p0 = [self.volume[-1],self.etotal[-1],75,3.5]  # Guess for initial parameters
+            popt,pcov = curve_fit(eos.murnaghan_EV, self.volume, self.etotal, p0)  
+
+        if plot:
+            plt.plot(self.volume,self.etotal,'ok',linestyle='None')
+            xfit = np.linspace(0.90*self.volume[0], 1.10*self.volume[-1],200)
+            yfit = eos.murnaghan_EV(xfit, popt[0],popt[1],popt[2],popt[3])
+            plt.plot(xfit,yfit)
+            plt.show()
+
+        print(popt[2]/cst.gpa_to_habo3)
+        
+        return popt[2], popt[3], popt[0]
+
+
+    def get_dedp(self):
+
+        pdata = eos.murnaghan_PV(self.volume,self.equilibrium_volume, self.bulk_modulus, self.bulk_modulus_derivative)
+        
+        # find which pressure is closer to zero. Make the linear fit with neighboring data
+        #fit = np.polyfit(pdata[5:-5],gap[5:-5],1)
+        #dedp = fit[0]
+        #return fit[0]
+        
 
 ############################################################
 # Also, split this into different files?
@@ -566,6 +652,8 @@ def compute(
         #Input files
         ddb_flists = None,
         out_flists = None,
+        etotal_flist = None,
+        gap_fname = None,
         rootname = 'te2.out',
 
         #Parameters
@@ -580,54 +668,81 @@ def compute(
         bulk_modulus = None,
         bulk_modulus_units = None,
 
+        expansion = True,
+        gruneisen = False,
+        bulkmodulus = False,
+        dedp = False,
+        initial_params = None,
+
         **kwargs):
 
     # Choose appropriate type of free energy 
-    if gibbs:
-        calc = GibbsFreeEnergy(
-                out_flists = out_flists, 
-                ddb_flists = ddb_flists,
-    
-                rootname = rootname,
-                symmetry = symmetry,
-    
-                wtq = wtq,
-                temperature = temperature,
-                units = units,
-                check_anaddb = check_anaddb,
-                
-                bulk_modulus = bulk_modulus,
-                bulk_modulus_units = bulk_modulus_units,
 
-    
-                **kwargs)
+    if bulkmodulus:
+        
+        static_calc = Static(
+                    rootname = rootname,
+                    symmetry = symmetry,
+                    
+                    etotal_flist = etotal_flist,
+                    gap_fname = gap_fname,
+            
+                    dedp = dedp,
+                    initial_params = initial_params,
+
+                    **kwargs)
+
+        ## write static output files
  
-    else:
-        calc = HelmholtzFreeEnergy(
-                out_flists = out_flists, 
-                ddb_flists = ddb_flists,
+    # Compute thermal expansion
+    if expansion:
+    ## ADD OPTIONS, TO MINIMIZE FREE ENERGY OR USE GRUNEISEN PARAMETERS
+        if gibbs:
+            calc = GibbsFreeEnergy(
+                    out_flists = out_flists, 
+                    ddb_flists = ddb_flists,
+        
+                    rootname = rootname,
+                    symmetry = symmetry,
+        
+                    wtq = wtq,
+                    temperature = temperature,
+                    units = units,
+                    check_anaddb = check_anaddb,
+## FIX ME : IF THERE WAS DATA FOR BULK MODULUS, USE IT!! OR, SIMPLY COMPUTE IT FROM DDB VOLUME DATA...                    
+                    bulk_modulus = bulk_modulus,
+                    bulk_modulus_units = bulk_modulus_units,
     
-                rootname = rootname,
-                symmetry = symmetry,
+        
+                    **kwargs)
+     
+        else:
+            calc = HelmholtzFreeEnergy(
+                    out_flists = out_flists, 
+                    ddb_flists = ddb_flists,
+        
+                    rootname = rootname,
+                    symmetry = symmetry,
+        
+                    wtq = wtq,
+                    temperature = temperature,
+                    units = units,
+                    check_anaddb = check_anaddb,
+        
+                    bulk_modulus = bulk_modulus,
+                    bulk_modulus_units = bulk_modulus_units,
     
-                wtq = wtq,
-                temperature = temperature,
-                units = units,
-                check_anaddb = check_anaddb,
-    
-                bulk_modulus = bulk_modulus,
-                bulk_modulus_units = bulk_modulus_units,
+                    **kwargs)
 
-                **kwargs)
-    
 
     # Write output file
 #    calc.write_freeenergy()
         # write gibbs or helmholtz, equilibrium acells (P,T), list of temperatures, pressures, initial volumes
         # in netcdf format, will allow to load the data for plotting
 #    calc.write_acell()
-        # write equilibrium acells, in ascii file
-    return calc
+       # write equilibrium acells, in ascii file
+    return
+    
 
 
 ###########################
