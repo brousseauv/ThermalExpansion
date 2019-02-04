@@ -593,11 +593,11 @@ class Static(object):
             self.volume[n] = gs.volume
 
 
-        self.bulk_modulus, self.bulk_modulus_derivative, self.equilibrium_volume =  self.get_bulk_modulus()
+        self.bulk_modulus, self.bulk_modulus_derivative, self.equilibrium_volume, self.equilibrium_energy =  self.get_bulk_modulus()
 
         if self.dedp:
     
-            self.dedp = self.get_dedp()
+            self.pressure, self.dedp_fit, self.dedp = self.get_dedp()
 
 
     def get_bulk_modulus(self):
@@ -621,18 +621,101 @@ class Static(object):
 
         print(popt[2]/cst.gpa_to_habo3)
         
-        return popt[2], popt[3], popt[0]
+        return popt[2], popt[3], popt[0], popt[1]
 
 
     def get_dedp(self):
 
         pdata = eos.murnaghan_PV(self.volume,self.equilibrium_volume, self.bulk_modulus, self.bulk_modulus_derivative)
-        
+        #print(pdata*cst.habo3_to_gpa)
+        #print(self.gap_energy*cst.ha_to_ev )
+
+        plt.plot(pdata, self.gap_energy,marker='s',color='k',linestyle='None')
+
         # find which pressure is closer to zero. Make the linear fit with neighboring data
-        #fit = np.polyfit(pdata[5:-5],gap[5:-5],1)
-        #dedp = fit[0]
-        #return fit[0]
+        p0 = np.abs(pdata).argmin()
+
+        fit = np.polyfit(pdata[p0-1:p0+2], self.gap_energy[p0-1:p0+2],1)
+        #plt.plot(pdata[p0-1:p0+2],self.gap_energy[p0-1:p0+2],marker='s',color='m',linestyle='None')
+
+        dedp = fit[0]
+        print('dedp  = {} meV/GPa'.format(dedp*cst.ha_to_ev*1000/cst.habo3_to_gpa))
+
+#        xfit = np.linspace(pdata[0],pdata[-1],100)
+#        yfit = xfit*fit[0] + fit[1]
+#        plt.plot(xfit,yfit)
+#        plt.show()
+        return pdata, fit, dedp  
         
+    def write_output(self):
+
+        fname = 'OUT/{}_STATIC.dat'.format(self.rootname)
+
+        create_directory(fname)
+
+        with open(fname,'w') as f:
+
+            f.write('Static lattice properties, from Murnaghan equation of state\n\n')
+            f.write('{:<35s} : {:>12.4f} bohr^3\n'.format('Equilibrium volume',self.equilibrium_volume))
+            f.write('{:<35s} : {:>12.4f} eV\n'.format('Equilibrium energy',self.equilibrium_energy*cst.ha_to_ev))
+            f.write('{:<35s} : {:>12.4f} GPa\n'.format('Bulk modulus',self.bulk_modulus*cst.habo3_to_gpa))
+            f.write('{:<35s} : {:>12.4f}\n'.format('Bulk modulus pressure derivative',self.bulk_modulus_derivative))
+            f.write('{:<35s} : {:>12.4f} meV/GPa\n'.format('dEgap/dP (P=0)', self.dedp*cst.ha_to_ev*1000/cst.habo3_to_gpa))
+
+        f.close()
+
+    def write_netcdf(self):
+        
+        fname = 'OUT/{}_STATIC.nc'.format(self.rootname)
+
+        create_directory(fname)
+
+        with nc.Dataset(fname,'w') as dts:
+
+            dts.createDimension('number_of_points',self.nfile)
+            dts.createDimension('one',1)
+            dts.createDimension('two',2)
+
+            data = dts.createVariable('equilibrium_volume','d',('one'))
+            data[:] = self.equilibrium_volume
+            data.units = 'bohr^3'
+            
+            data = dts.createVariable('equilibrium_energy','d',('one'))
+            data[:] = self.equilibrium_energy
+            data.units = 'hartree'
+           
+            data = dts.createVariable('bulk_modulus','d',('one'))
+            data[:] = self.bulk_modulus*cst.habo3_to_gpa
+            data.units = 'GPa'
+
+            data = dts.createVariable('bulk_modulus_derivative','d',('one'))
+            data[:] = self.bulk_modulus_derivative
+            data.units = 'None'
+
+            data = dts.createVariable('total_energy','d',('number_of_points'))
+            data[:] = self.etotal
+            data.units = 'hartree'
+
+            data = dts.createVariable('pressure','d',('number_of_points'))
+            data[:] = self.pressure*cst.habo3_to_gpa
+            data.units = 'GPa'
+
+            data = dts.createVariable('volume','d',('number_of_points'))
+            data[:] = self.volume
+            data.units = 'bohr^3'
+
+            data = dts.createVariable('gap_energy','d', ('number_of_points'))
+            data[:] = self.gap_energy
+            data.units = 'hartree'
+
+            data = dts.createVariable('dE_dP','d',('one'))
+            data[:] = self.dedp*cst.ha_to_ev*1000/cst.habo3_to_gpa
+            data.units = 'meV/GPa'
+
+            data = dts.createVariable('dedp_fit','d',('two'))
+            self.dedp_fit[0] = self.dedp_fit[0]/cst.habo3_to_gpa
+            data[:] = self.dedp_fit
+            data.units = 'hartree/GPa, hartree'            
 
 ############################################################
 # Also, split this into different files?
@@ -693,6 +776,8 @@ def compute(
                     **kwargs)
 
         ## write static output files
+        static_calc.write_output()
+        static_calc.write_netcdf()
  
     # Compute thermal expansion
     if expansion:
