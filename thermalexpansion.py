@@ -21,8 +21,8 @@ from gapfile import GapFile
 import eos as eos
 
 from matplotlib import rc
-rc('text', usetex = True)
-rc('font', family = 'serif', weight = 'bold')
+#rc('text', usetex = True)
+#rc('font', family = 'serif', weight = 'bold')
 
 ###################################
 
@@ -558,6 +558,8 @@ class Static(object):
             gap_fname = None,             
             initial_params = None,
 
+            static_plot = False,
+
             **kwargs):
 
         self.rootname = rootname
@@ -566,7 +568,7 @@ class Static(object):
         self.gap_fname = gap_fname
         self.dedp = dedp
         self.initial_params = initial_params
-
+        self.static_plot = static_plot
 
         # Data check
         if not self.etotal_flist:
@@ -602,7 +604,6 @@ class Static(object):
 
     def get_bulk_modulus(self):
 
-        plot = False
         
         if self.initial_params:
             p0 = self.initial_params
@@ -612,11 +613,22 @@ class Static(object):
             p0 = [self.volume[-1],self.etotal[-1],75,3.5]  # Guess for initial parameters
             popt,pcov = curve_fit(eos.murnaghan_EV, self.volume, self.etotal, p0)  
 
-        if plot:
-            plt.plot(self.volume,self.etotal,'ok',linestyle='None')
+        if self.static_plot:
+            plt.plot(self.volume,self.etotal,'ok',linestyle='None',label='data')
             xfit = np.linspace(0.90*self.volume[0], 1.10*self.volume[-1],200)
             yfit = eos.murnaghan_EV(xfit, popt[0],popt[1],popt[2],popt[3])
-            plt.plot(xfit,yfit)
+            plt.plot(xfit,yfit,label='fit')
+
+            plt.xlabel('Unit cell volume (bohr^3)')
+            plt.ylabel('Total energy (Ha)')
+            plt.legend(numpoints=1)
+            plt.title('Murnaghan EOS')
+            plt.tight_layout()
+
+            figname = 'figures/{}_murnaghan.png'.format(self.rootname)
+            create_directory(figname)
+            plt.savefig(figname)
+
             plt.show()
 
         print(popt[2]/cst.gpa_to_habo3)
@@ -630,21 +642,34 @@ class Static(object):
         #print(pdata*cst.habo3_to_gpa)
         #print(self.gap_energy*cst.ha_to_ev )
 
-        plt.plot(pdata, self.gap_energy,marker='s',color='k',linestyle='None')
 
         # find which pressure is closer to zero. Make the linear fit with neighboring data
         p0 = np.abs(pdata).argmin()
 
         fit = np.polyfit(pdata[p0-1:p0+2], self.gap_energy[p0-1:p0+2],1)
-        #plt.plot(pdata[p0-1:p0+2],self.gap_energy[p0-1:p0+2],marker='s',color='m',linestyle='None')
 
         dedp = fit[0]
         print('dedp  = {} meV/GPa'.format(dedp*cst.ha_to_ev*1000/cst.habo3_to_gpa))
 
-#        xfit = np.linspace(pdata[0],pdata[-1],100)
-#        yfit = xfit*fit[0] + fit[1]
-#        plt.plot(xfit,yfit)
-#        plt.show()
+        if self.static_plot:
+
+            plt.plot(pdata*cst.habo3_to_gpa, self.gap_energy*cst.ha_to_ev,marker='s',color='k',linestyle='None',label='data')
+            plt.plot(pdata[p0-1:p0+2]*cst.habo3_to_gpa,self.gap_energy[p0-1:p0+2]*cst.ha_to_ev,marker='s',color='m',linestyle='None',label='fitting data')
+    
+            xfit = np.linspace(pdata[0],pdata[-1],100)
+            yfit = xfit*fit[0] + fit[1]
+            plt.plot(xfit*cst.habo3_to_gpa,yfit*cst.ha_to_ev,label='fit')
+
+            plt.xlabel('Pressure (GPa)')
+            plt.ylabel('Gap energy (eV)')
+            plt.legend(numpoints=1)
+            plt.title('dEgap/dP')
+            plt.tight_layout()
+
+            figname = 'figures/{}_dedp.png'.format(self.rootname)
+            create_directory(figname)
+            plt.savefig(figname)
+            plt.show()
         return pdata, fit, dedp  
         
     def write_output(self):
@@ -756,6 +781,7 @@ def compute(
         bulkmodulus = False,
         dedp = False,
         initial_params = None,
+        static_plot = False,
 
         **kwargs):
 
@@ -772,6 +798,8 @@ def compute(
             
                     dedp = dedp,
                     initial_params = initial_params,
+
+                    static_plot = static_plot,
 
                     **kwargs)
 
