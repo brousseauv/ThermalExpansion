@@ -586,7 +586,7 @@ class Static(object):
         gap = GapFile(self.gap_fname)
         self.gap_energy = gap.gap_energy
         if len(self.gap_energy) != self.nfile:
-            raise Exception('{} contains {} gap values, while there are {} files in etotal_flist. '.format(self.gap_fname, self.nfile, len(self.gap_energy)))
+            raise Exception('{} contains {} gap values, while there are {} files in etotal_flist. '.format(self.gap_fname, len(self.gap_energy),self.nfile))
 
         for n, fname in enumerate(self.etotal_flist):
 
