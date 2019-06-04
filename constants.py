@@ -20,7 +20,7 @@ habohr_to_evang = ha_to_ev/bohr_to_ang
 ev_to_j = 1.60217657E-19
 
 # Boltzmann constant
-kb_hak = 3.1668154267112283e-06
+kb_haK = 3.1668154267112283e-06
 
 # Avogadro number
 avogadro = 6.022140857E23

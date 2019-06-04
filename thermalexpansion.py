@@ -72,7 +72,7 @@ class FreeEnergy(object):
 
             x = omega/(cst.kb_haK*T)
             # prevent divergence of the log 
-            if x < cst.tolx:
+            if x < tolx:
                 continue
 
             z[t] = np.log(1 - np.exp(-x))
@@ -499,7 +499,7 @@ class Gruneisen(FreeEnergy):
     wtq = [1.0]
     temperature = None
 
-    check_anaddb = False
+#    check_anaddb = False
 
     def __init__(self,
 
@@ -513,7 +513,7 @@ class Gruneisen(FreeEnergy):
         wtq = [1.0],
         temperature = np.arange(0,300,50),
 
-        check_anaddb = False,
+#        check_anaddb = False,
 
         bulk_modulus = None,
         bulk_modulus_units = None,
@@ -521,7 +521,7 @@ class Gruneisen(FreeEnergy):
         **kwargs):
 
 
-        print('Computing Helmoltz free energy')
+        print('Computing Gruneisen parameters')
         if not ddb_flists:
             raise Exception('Must provide a list of files for ddb_flists')
         if not out_flists:
@@ -538,8 +538,8 @@ class Gruneisen(FreeEnergy):
         if not self.symmetry:
             raise Exception('Symmetry type must be specified')
 
-        super(HelmholtzFreeEnergy,self).__init__(rootname,units)
-        self.check_anaddb = check_anaddb
+        super(Gruneisen,self).__init__(rootname,units)
+#        self.check_anaddb = check_anaddb
 
         self.temperature = temperature
         self.ntemp = len(self.temperature) 
@@ -553,7 +553,7 @@ class Gruneisen(FreeEnergy):
 
         # set parameter space dimensions
         nvol, nqpt = np.shape(self.ddb_flists)
-        self.free_energy = np.zeros((nvol,self.ntemp))
+#        self.free_energy = np.zeros((nvol,self.ntemp))
         self.qred = np.zeros((nqpt,3))
 
         self.volume = np.empty((nvol,4)) # 1st index = data index, 2nd index : total cell volume, (a1,a2,a3)
@@ -620,11 +620,11 @@ class Gruneisen(FreeEnergy):
                 F_T += self.wtq[i]*self.get_fthermal(ddb.omega,nmode)
                 
             # Sum free energy = E + F_0 + F_T
-            self.free_energy[v,:] = (E+F_0)*np.ones((self.ntemp)) + F_T
+#            self.free_energy[v,:] = (E+F_0)*np.ones((self.ntemp)) + F_T
 
-        if self.check_anaddb:
-            # Convert results in J/mol-cell, to compare with anaddb output
-            self.ha2molc(F_0,F_T)
+#        if self.check_anaddb:
+#            # Convert results in J/mol-cell, to compare with anaddb output
+#            self.ha2molc(F_0,F_T)
 
         # Minimize F
         #Here, I have F[nvol,T] and also the detailed acell for each volume
@@ -640,41 +640,41 @@ class Gruneisen(FreeEnergy):
         
         # Minimize F, according to crystal symmetry
         #self.temperature_dependent_acell = self.minimize_free_energy()
+        self.equilibrium_volume = self.volume[1,:]
         self.gruneisen = self.get_gruneisen(nqpt,nmode,nvol)
         self.acell_via_gruneisen = self.get_acell(nqpt,nmode)
-        print(self.volume[:,0])
         
 # add a function to get the grüneisen mode parameters. This will require to store the frequencies for computation after all volumes have been read and analysed.
 # for the Gruneisen, I need the derivative od the frequencies vs volume.
 
-    def minimize_free_energy(self):
-
-        plot = False
-
-        if plot:
-            import matplotlib.pyplot as plt
-        
-        if self.symmetry == 'cubic':
-            
-            fit = np.zeros((self.ntemp))
-
-            #print(self.free_energy)
-            #print(self.volume)
-            for t, T in enumerate(self.temperature):
-                afit = np.polyfit(self.volume[:,1],self.free_energy[:,t],2)
-                fit[t] = -afit[1]/(2*afit[0])
-
-                if plot:
-                    xfit = np.linspace(9.50,12.0,100)
-                    yfit = afit[0]*xfit**2 + afit[1]*xfit + afit[2]
-                    #print(self.volume)
-                    plt.plot(self.volume[:,1],self.free_energy[:,t],marker='o')
-                    plt.plot(xfit,yfit)
-
-            if plot:
-                plt.show()
-
-        return fit
+#    def minimize_free_energy(self):
+#
+#        plot = False
+#
+#        if plot:
+#            import matplotlib.pyplot as plt
+#        
+#        if self.symmetry == 'cubic':
+#            
+#            fit = np.zeros((self.ntemp))
+#
+#            #print(self.free_energy)
+#            #print(self.volume)
+#            for t, T in enumerate(self.temperature):
+#                afit = np.polyfit(self.volume[:,1],self.free_energy[:,t],2)
+#                fit[t] = -afit[1]/(2*afit[0])
+#
+#                if plot:
+#                    xfit = np.linspace(9.50,12.0,100)
+#                    yfit = afit[0]*xfit**2 + afit[1]*xfit + afit[2]
+#                    #print(self.volume)
+#                    plt.plot(self.volume[:,1],self.free_energy[:,t],marker='o')
+#                    plt.plot(xfit,yfit)
+#
+#            if plot:
+#                plt.show()
+#
+#        return fit
 
     def get_gruneisen(self, nqpt, nmode,nvol):
 
@@ -694,8 +694,12 @@ class Gruneisen(FreeEnergy):
                 # put Gruneisen at zero for acoustic modes at Gamma
                     gru[q,v] = 0
                 else:
-                    gru[q,v] = -1*np.polyfit(np.log(self.volume[:,1]), np.log(self.omega[:,q,v]),1)[0]
-               
+#                    gru[q,v] = -1*np.polyfit(np.log(self.volume[:,1]), np.log(self.omega[:,q,v]),1)[0]
+                    # This is the LINEAR gruneisen parameters
+#                    gru[q,v] = -self.volume[1,1]/self.omega[1,q,v]*np.polyfit(self.volume[:,1],self.omega[:,q,v],1)[0]
+                    # This is the VOLUMIC one (that is, gru(linear)/3)
+                    gru[q,v] = -self.volume[1,0]/self.omega[1,q,v]*np.polyfit(self.volume[:,0],self.omega[:,q,v],1)[0]
+              
             # correct divergence at q-->0
             # this would extrapolate Gruneisen at q=0 from neighboring qpts
             #x = [np.linalg.norm(self.qred[1,:]),np.linalg.norm(self.qred[2,:])]
@@ -727,7 +731,7 @@ class Gruneisen(FreeEnergy):
                     arr[0][1].plot(self.omega[1,:,v]*cst.ha_to_ev*1000,gru2[:,v],color=col[v],marker = 'o',linestyle='None')
                     arr[0][1].set_xlabel('Frequency (meV)')
                     arr[0][1].set_ylabel('Mode Gruneisen')
-                    arr[0][0].set_title(r'Slope ln$\omega$ vs lnV') 
+                    arr[0][0].set_title(r'Slope $\omega$ vs V') 
                     arr[0][1].set_title(r'Dynamical matrix') 
                     arr[0][0].plot(self.omega[1,0,v]*cst.ha_to_ev*1000,gru[0,v],marker='d',color='black',linestyle='None')
                     arr[0][0].plot(self.omega[1,16,v]*cst.ha_to_ev*1000,gru[16,v],marker='s',color='black',linestyle='None')
@@ -750,7 +754,7 @@ class Gruneisen(FreeEnergy):
         # Evaluate acell(T) from Gruneisen parameters
         if self.symmetry == 'cubic':
             
-            plot = False
+            plot = True
             # First, get alpha(T)
             x = np.zeros((nqpt,nmode,self.ntemp)) # q,v,t
             for t in range(self.ntemp):
@@ -771,21 +775,32 @@ class Gruneisen(FreeEnergy):
 
             if plot:
                 import matplotlib.pyplot as plt
-                fig,arr = plt.subplots(1,2,figsize=(15,5),sharey=False)
+                fig,arr = plt.subplots(1,3,figsize=(15,5),sharey=False)
                 arr[0].plot(self.temperature,alpha*1E6) 
                 arr[1].plot(self.temperature,alpha2*1E6) 
                 arr[0].set_ylabel(r'$\alpha$ ($10^{-6}$ K$^{-1}$)')
                 arr[0].set_xlabel(r'Temperature (K)')
                 arr[1].set_xlabel(r'Temperature (K)')
-                arr[0].set_title(r'Slope ln$\omega$ vs lnV') 
+                arr[0].set_title(r'Slope $\omega$ vs V') 
                 arr[1].set_title(r'Dynamical matrix') 
+                arr[2].plot(self.temperature-273, a*cst.bohr_to_ang, 'or')
+                arr[2].set_ylabel(r'a (ang)')
+                arr[2].set_xlabel(r'T (Celcius)')
+                arr[2].set_xlim((-100,250))
+        
+                xexp = np.array([26.0,48.86,74.87,81.22,86.93,86.29,88.83,95.18,102.79,109.77,117.39,142.13,201.78,213.20])
+                yexp = np.array([5.6498,5.6511,5.6525,5.6528,5.6525,5.6531,5.6532,5.6534,5.6538,5.6542,5.6546,5.6560,5.6580,5.6598])
+                arr[2].plot(xexp,yexp,'bx')
 
 
-                plt.savefig('alpha_GaAs.png')
+#                plt.savefig('alpha_GaAs.png')
                 plt.show() 
             
-            
+#            for t,T in enumerate(self.temperature):
+#                print('T={}K, a={} bohr'.format(T,a[t]))
+
             return a
+
     def gruneisen_from_dynmat(self,nqpt,nmode,nvol):
 
         # This computes the gruneisen parameters from the change in the dynamical matrix
