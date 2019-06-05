@@ -618,8 +618,8 @@ class Gruneisen(FreeEnergy):
                 F_0 += self.wtq[i]*self.get_f0(ddb.omega) 
                 # get Ftherm contribution
                 F_T += self.wtq[i]*self.get_fthermal(ddb.omega,nmode)
+
                 
-            # Sum free energy = E + F_0 + F_T
 #            self.free_energy[v,:] = (E+F_0)*np.ones((self.ntemp)) + F_T
 
 #        if self.check_anaddb:
@@ -696,9 +696,9 @@ class Gruneisen(FreeEnergy):
                 else:
 #                    gru[q,v] = -1*np.polyfit(np.log(self.volume[:,1]), np.log(self.omega[:,q,v]),1)[0]
                     # This is the LINEAR gruneisen parameters
-#                    gru[q,v] = -self.volume[1,1]/self.omega[1,q,v]*np.polyfit(self.volume[:,1],self.omega[:,q,v],1)[0]
+                    gru[q,v] = -self.volume[1,1]/self.omega[1,q,v]*np.polyfit(self.volume[:,1],self.omega[:,q,v],1)[0]
                     # This is the VOLUMIC one (that is, gru(linear)/3)
-                    gru[q,v] = -self.volume[1,0]/self.omega[1,q,v]*np.polyfit(self.volume[:,0],self.omega[:,q,v],1)[0]
+#                    gru[q,v] = -self.volume[1,0]/self.omega[1,q,v]*np.polyfit(self.volume[:,0],self.omega[:,q,v],1)[0]
               
             # correct divergence at q-->0
             # this would extrapolate Gruneisen at q=0 from neighboring qpts
@@ -812,8 +812,9 @@ class Gruneisen(FreeEnergy):
         dplus =  2
         d0 = 1
         dminus = 0 # put this in a function
-        dV = self.volume[dplus,1] - self.volume[dminus,1]
-        V0 = self.volume[d0,1]
+        dV = self.volume[dplus,0] - self.volume[dminus,0]
+        V0 = self.volume[d0,0]
+
 
         for i in range(nqpt):
             dD = np.zeros((nmode,nmode),dtype=complex)
@@ -839,12 +840,15 @@ class Gruneisen(FreeEnergy):
                 if v==dminus:
                     dD -= dynmat
                 if v==d0:
+                    #eigval is omega^2
                     eigval, eigvect = np.linalg.eigh(dynmat)
 
                     for ii in np.arange(ddb.natom):
                         for dir1 in np.arange(3):
                             ipert = ii*3 + dir1
                             eigvect[ipert] = eigvect[ipert]*np.sqrt(cst.me_amu/amu[ii])
+#                            eigvect[ipert] = eigvect[ipert]
+
                     
                     if is_gamma:
                         eigval[0] = 0.0
@@ -855,8 +859,9 @@ class Gruneisen(FreeEnergy):
                         if eig < 0.0:
                             warnings.warn('Negative eigenvalue changed to 0')
                             eigval[ieig] = 0.0
-            #if i==1:
-            #    print(dD)
+
+            # end v in range(nvol)
+       
             dD_at_q = []
             
             for eig in eigvect:
@@ -865,7 +870,7 @@ class Gruneisen(FreeEnergy):
 #                if i==1:
                 #    print(eig)
                #     print(np.dot(dD,eig))
-                    #print(dD_at_q)
+                #print(dD_at_q)
                     
 
             dD_at_q = np.array(dD_at_q)
@@ -876,12 +881,13 @@ class Gruneisen(FreeEnergy):
                 else:
                     gru[i,v] = -V0*dD_at_q[v]/(2*eigval[v].real*dV)
             if i==1:
-
-                print('Dynamical matrix')
-                print('delta omega^2 {}'.format(dD_at_q))
-                print('omega0 {}'.format(eigval[:]))
+#
+#                print('Dynamical matrix')
+#                print('delta omega^2 {}'.format(dD_at_q))
+#                print('omega0 {}'.format(eigval[:]))
                 print('gruneisen {}'.format(gru[i,:]))
 
+        # end i in range(nqpt)
 
         return gru
 
