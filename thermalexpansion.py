@@ -28,6 +28,9 @@ from matplotlib import rc
 
     
 tolx = 1E-16
+tol12 = 1E-12
+tol6 = 1E-6
+tol20 = 1E-20
 
 class FreeEnergy(object):
 
@@ -60,14 +63,14 @@ class FreeEnergy(object):
 
         return cst.kb_haK*self.temperature*Zfactor
 
-    def get_Zfactor(self,omega):
+    def get_Zfactor(self, omega):
         
         z = np.zeros(self.ntemp)
 
         for t, T in enumerate(self.temperature):
             
             # Prevent dividing by 0
-            if T<1E-20 :
+            if T<tol20 :
                 continue
 
             x = omega/(cst.kb_haK*T)
@@ -105,7 +108,45 @@ class FreeEnergy(object):
                 arr.append[i+1]
 
         return arr 
-    
+
+    def get_bose(self,omega,temp):
+
+        # This returns the Bose-Einstein function value for given omega and T, and prevents division by zero
+        bose = np.zeros(len(temp))
+
+        for t, T in enumerate(temp):
+
+            if T<tol6:
+                continue
+
+            x = omega/(cst.kb_haK*T)
+
+            if x<tolx:
+                continue
+
+            bose[t] = 1./(np.exp(x)-1)
+
+        return bose
+
+    def get_specific_heat(self,omega,temp):
+
+        # this returns the phonon specific heat
+        cv = np.zeros(len(temp))
+
+        for t,T in enumerate(temp):
+
+            if T<tol6:
+                continue
+
+            x = omega/(cst.kb_haK*T)
+
+            if x<tolx:
+                continue
+
+            cv[t] = cst.kb_haK*x**2*np.exp(x)/(np.exp(x)-1)**2
+
+        return cv
+
  
 class HelmholtzFreeEnergy(FreeEnergy):
 
@@ -678,7 +719,7 @@ class Gruneisen(FreeEnergy):
 
     def get_gruneisen(self, nqpt, nmode,nvol):
 
-        plot = True 
+        plot = False 
 
         if plot :
             import matplotlib.pyplot as plt
@@ -696,9 +737,9 @@ class Gruneisen(FreeEnergy):
                 else:
 #                    gru[q,v] = -1*np.polyfit(np.log(self.volume[:,1]), np.log(self.omega[:,q,v]),1)[0]
                     # This is the LINEAR gruneisen parameters
-                    gru[q,v] = -self.volume[1,1]/self.omega[1,q,v]*np.polyfit(self.volume[:,1],self.omega[:,q,v],1)[0]
+#                    gru[q,v] = -self.volume[1,1]/self.omega[1,q,v]*np.polyfit(self.volume[:,1],self.omega[:,q,v],1)[0]
                     # This is the VOLUMIC one (that is, gru(linear)/3)
-#                    gru[q,v] = -self.volume[1,0]/self.omega[1,q,v]*np.polyfit(self.volume[:,0],self.omega[:,q,v],1)[0]
+                    gru[q,v] = -self.volume[1,0]/self.omega[1,q,v]*np.polyfit(self.volume[:,0],self.omega[:,q,v],1)[0]
               
             # correct divergence at q-->0
             # this would extrapolate Gruneisen at q=0 from neighboring qpts
@@ -709,6 +750,10 @@ class Gruneisen(FreeEnergy):
             
             gru2 = self.gruneisen_from_dynmat(nqpt,nmode,nvol)
             self.gru2 = gru2
+
+
+            # get the effective pressure from phonons, for a given temperature
+
 
             #print('slope')
             #print('delta omega {}'.format(self.omega[2,1,:]-self.omega[0,1,:]))
@@ -735,6 +780,7 @@ class Gruneisen(FreeEnergy):
                     arr[0][1].set_title(r'Dynamical matrix') 
                     arr[0][0].plot(self.omega[1,0,v]*cst.ha_to_ev*1000,gru[0,v],marker='d',color='black',linestyle='None')
                     arr[0][0].plot(self.omega[1,16,v]*cst.ha_to_ev*1000,gru[16,v],marker='s',color='black',linestyle='None')
+                    arr[0][0].grid(b=True, which='major')
 
 
 #            if plot:
@@ -754,17 +800,28 @@ class Gruneisen(FreeEnergy):
         # Evaluate acell(T) from Gruneisen parameters
         if self.symmetry == 'cubic':
             
-            plot = True
+            plot = False
             # First, get alpha(T)
-            x = np.zeros((nqpt,nmode,self.ntemp)) # q,v,t
-            for t in range(self.ntemp):
-                x[:,:,t] = self.omega[1,:,:]/(cst.kb_haK*self.temperature[t])
-            cv = cst.kb_haK*x**2*np.exp(x)/(np.exp(x)-1)**2
-            bose = 1./(np.exp(x)-1)
-            bose[0,:3,:] = 0 # Check what Gabriel did)
+
+            # Get Bose-Einstein factor and specific heat Cv
+            bose = np.zeros((nqpt,nmode, self.ntemp))
+            cv = np.zeros((nqpt,nmode,self.ntemp))
+
+            for i,n in itt.product(range(nqpt),range(nmode)):
+                bose[i,n,:] = self.get_bose(self.omega[1,i,n],self.temperature)
+                cv[i,n,:] = self.get_specific_heat(self.omega[1,i,n],self.temperature)
+
+#            x = np.zeros((nqpt,nmode,self.ntemp)) # q,v,t
+
+#            for t in range(self.ntemp):
+#                x[:,:,t] = self.omega[1,:,:]/(cst.kb_haK*self.temperature[t])
+#            cv = cst.kb_haK*x**2*np.exp(x)/(np.exp(x)-1)**2
+           # bose = self.get_bose() 
+            #bose = 1./(np.exp(x)-1)
+            #bose[0,:3,:] = 0 # Check what Gabriel did)
             hwt = np.einsum('qv,qvt->qvt',self.omega[1,:,:],bose)
             # fix this properly later!!! 
-            cv[0,:3,:] = 0
+            #cv[0,:3,:] = 0
 
             alpha = np.einsum('q,qvt,qv->t',self.wtq,cv,self.gruneisen)/(self.volume[1,0]*self.bulk_modulus)
             alpha2 = np.einsum('q,qvt,qv->t',self.wtq,cv,self.gru2)/(self.volume[1,0]*self.bulk_modulus)
@@ -816,6 +873,8 @@ class Gruneisen(FreeEnergy):
         V0 = self.volume[d0,0]
 
 
+#        fg = open('gruneisen_dynmat.dat','w')
+        fg = open('dotproduct_dynmat.dat','w')
         for i in range(nqpt):
             dD = np.zeros((nmode,nmode),dtype=complex)
             for v in range(nvol):
@@ -843,12 +902,13 @@ class Gruneisen(FreeEnergy):
                     #eigval is omega^2
                     eigval, eigvect = np.linalg.eigh(dynmat)
 
+                    omega = np.sqrt(np.abs(eigval)) * np.sign(eigval)
+
                     for ii in np.arange(ddb.natom):
                         for dir1 in np.arange(3):
                             ipert = ii*3 + dir1
-                            eigvect[ipert] = eigvect[ipert]*np.sqrt(cst.me_amu/amu[ii])
-#                            eigvect[ipert] = eigvect[ipert]
-
+#                            eigvect[ipert] = eigvect[ipert]*np.sqrt(cst.me_amu/amu[ii])
+                            eigvect[ipert] = eigvect[ipert]
                     
                     if is_gamma:
                         eigval[0] = 0.0
@@ -863,7 +923,7 @@ class Gruneisen(FreeEnergy):
             # end v in range(nvol)
        
             dD_at_q = []
-            
+
             for eig in eigvect:
 
                 dD_at_q.append(np.vdot(np.transpose(eig), np.dot(dD,eig)).real)   
@@ -875,17 +935,42 @@ class Gruneisen(FreeEnergy):
 
             dD_at_q = np.array(dD_at_q)
 
+            fg.write('\nqpt {}\n'.format(i+1))
+#            fg.write('Real part:\n')
             for v in range(nmode):
-                if i==0 and v<3:
+
+                fg.write('Eigenvectors\n')
+#                fg.write('{:>12.8e} {:>12.8e} {:>12.8e} {:>12.8e} {:>12.8e} {:>12.8e}\n'.format(dD[v,0].real/dV,dD[v,1].real/dV,dD[v,2].real/dV,dD[v,3].real/dV,dD[v,4].real/dV,dD[v,5].real/dV))
+                fg.write('{:>12.8e} {:>12.8e} {:>12.8e} {:>12.8e} {:>12.8e} {:>12.8e}\n'.format(eigvect[v,0].real,eigvect[v,1].real,eigvect[v,2].real,eigvect[v,3].real,eigvect[v,4].real,eigvect[v,5].real))
+                fg.write('{:>12.8e} {:>12.8e} {:>12.8e} {:>12.8e} {:>12.8e} {:>12.8e}\n'.format(eigvect[v,0].imag,eigvect[v,1].imag,eigvect[v,2].imag,eigvect[v,3].imag,eigvect[v,4].imag,eigvect[v,5].imag))
+
+#                if i==0 and v<3:
+                if omega[v] < tol12:
                     gru[i,v] = 0
                 else:
-                    gru[i,v] = -V0*dD_at_q[v]/(2*eigval[v].real*dV)
-            if i==1:
+                    gru[i,v] = -V0*dD_at_q[v]/(2*np.abs(eigval[v].real)*dV)
+#            fg.write('Imaginary part:\n')
+#            for v in range(nmode):
+#                fg.write('{:>12.8e} {:>12.8e} {:>12.8e} {:>12.8e} {:>12.8e} {:>12.8e}\n'.format(dD[v,0].imag/dV,dD[v,1].imag/dV,dD[v,2].imag/dV,dD[v,3].imag/dV,dD[v,4].imag/dV,dD[v,5].imag/dV))
+
+            fg.write('dD/dV|u>\n')
+            for v in range(nmode):
+                omat = np.dot(dD/dV,eigvect[v,:])
+                fg.write('{:>12.8e} {:>12.8e} {:>12.8e} {:>12.8e} {:>12.8e} {:>12.8e}\n'.format(omat[0].real,omat[1].real,omat[2].real,omat[3].real,omat[4].real,omat[5].real))
+                fg.write('{:>12.8e} {:>12.8e} {:>12.8e} {:>12.8e} {:>12.8e} {:>12.8e}\n'.format(omat[0].imag,omat[1].imag,omat[2].imag,omat[3].imag,omat[4].imag,omat[5].imag))
+
+                fg.write('Dot product:\n')
+                dot = np.vdot(np.transpose(eigvect[v,:]),omat)
+                fg.write('{:>12.8e}\n'.format(dot.real))     
+        
+
+#            if i==1:
 #
 #                print('Dynamical matrix')
 #                print('delta omega^2 {}'.format(dD_at_q))
 #                print('omega0 {}'.format(eigval[:]))
-                print('gruneisen {}'.format(gru[i,:]))
+#                print('gruneisen {}'.format(gru[i,:]))
+                
 
         # end i in range(nqpt)
 
