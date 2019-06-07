@@ -867,7 +867,7 @@ class Gruneisen(FreeEnergy):
         if self.symmetry == 'cubic':
 
             boseplushalf = self.bose + 0.5*np.ones((np.shape(self.bose)))
-            #NOT w^2!!!
+            #NOT w^2!!!?!?!? if it is not w^2, I have a much too big result...
             pph = -1*np.einsum('qv,qvt,qv->t',self.omega[1,:,:],self.bose,self.gruneisen)/self.volume[1,1]
             pph2 = -1*np.einsum('qv,qvt,qv->t',self.omega[1,:,:],boseplushalf,self.gruneisen)/self.volume[1,1]
 
