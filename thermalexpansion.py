@@ -684,6 +684,7 @@ class Gruneisen(FreeEnergy):
         self.equilibrium_volume = self.volume[1,:]
         self.gruneisen = self.get_gruneisen(nqpt,nmode,nvol)
         self.acell_via_gruneisen = self.get_acell(nqpt,nmode)
+        self.effective_phonon_pressure = self.get_phonon_effective_pressure(nqpt,nmode)
         
 # add a function to get the grüneisen mode parameters. This will require to store the frequencies for computation after all volumes have been read and analysed.
 # for the Gruneisen, I need the derivative od the frequencies vs volume.
@@ -737,9 +738,9 @@ class Gruneisen(FreeEnergy):
                 else:
 #                    gru[q,v] = -1*np.polyfit(np.log(self.volume[:,1]), np.log(self.omega[:,q,v]),1)[0]
                     # This is the LINEAR gruneisen parameters
-#                    gru[q,v] = -self.volume[1,1]/self.omega[1,q,v]*np.polyfit(self.volume[:,1],self.omega[:,q,v],1)[0]
+                    gru[q,v] = -self.volume[1,1]/self.omega[1,q,v]*np.polyfit(self.volume[:,1],self.omega[:,q,v],1)[0]
                     # This is the VOLUMIC one (that is, gru(linear)/3)
-                    gru[q,v] = -self.volume[1,0]/self.omega[1,q,v]*np.polyfit(self.volume[:,0],self.omega[:,q,v],1)[0]
+#                    gru[q,v] = -self.volume[1,0]/self.omega[1,q,v]*np.polyfit(self.volume[:,0],self.omega[:,q,v],1)[0]
               
             # correct divergence at q-->0
             # this would extrapolate Gruneisen at q=0 from neighboring qpts
@@ -804,11 +805,11 @@ class Gruneisen(FreeEnergy):
             # First, get alpha(T)
 
             # Get Bose-Einstein factor and specific heat Cv
-            bose = np.zeros((nqpt,nmode, self.ntemp))
+            self.bose = np.zeros((nqpt,nmode, self.ntemp))
             cv = np.zeros((nqpt,nmode,self.ntemp))
 
             for i,n in itt.product(range(nqpt),range(nmode)):
-                bose[i,n,:] = self.get_bose(self.omega[1,i,n],self.temperature)
+                self.bose[i,n,:] = self.get_bose(self.omega[1,i,n],self.temperature)
                 cv[i,n,:] = self.get_specific_heat(self.omega[1,i,n],self.temperature)
 
 #            x = np.zeros((nqpt,nmode,self.ntemp)) # q,v,t
@@ -819,7 +820,7 @@ class Gruneisen(FreeEnergy):
            # bose = self.get_bose() 
             #bose = 1./(np.exp(x)-1)
             #bose[0,:3,:] = 0 # Check what Gabriel did)
-            hwt = np.einsum('qv,qvt->qvt',self.omega[1,:,:],bose)
+            hwt = np.einsum('qv,qvt->qvt',self.omega[1,:,:],self.bose)
             # fix this properly later!!! 
             #cv[0,:3,:] = 0
 
@@ -853,10 +854,29 @@ class Gruneisen(FreeEnergy):
 #                plt.savefig('alpha_GaAs.png')
                 plt.show() 
             
-#            for t,T in enumerate(self.temperature):
-#                print('T={}K, a={} bohr'.format(T,a[t]))
+            for t,T in enumerate(self.temperature):
+                print('T={}K, a={} bohr'.format(T,a[t]))
 
             return a
+
+    def get_phonon_effective_pressure(self,nqpt,nmode):
+
+        # This function computes the phonon "effective pressure", that is, 
+        # P_ph(T) ~  -dF_ph/dV
+
+        if self.symmetry == 'cubic':
+
+            boseplushalf = self.bose + 0.5*np.ones((np.shape(self.bose)))
+            #NOT w^2!!!
+            pph = -1*np.einsum('qv,qvt,qv->t',self.omega[1,:,:],self.bose,self.gruneisen)/self.volume[1,1]
+            pph2 = -1*np.einsum('qv,qvt,qv->t',self.omega[1,:,:],boseplushalf,self.gruneisen)/self.volume[1,1]
+
+
+            for t,T in enumerate(self.temperature):
+                print('T={}K, Pphonon = {} GPa'.format(T,pph[t]*cst.habo3_to_gpa))
+                print('T={}K, Pphonon (+1/2) = {} GPa'.format(T,pph2[t]*cst.habo3_to_gpa))
+
+            return pph
 
     def gruneisen_from_dynmat(self,nqpt,nmode,nvol):
 
