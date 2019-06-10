@@ -18,6 +18,7 @@ from ElectronPhononCoupling import DdbFile
 from outfile import OutFile
 from gsrfile import GsrFile
 from gapfile import GapFile
+from elasticfile import ElasticFile
 import eos as eos
 
 from matplotlib import rc
@@ -535,6 +536,7 @@ class Gruneisen(FreeEnergy):
     #Input files
     ddb_flists = None
     out_flists = None
+    elastic_fname = None
 
     #Parameters
     wtq = [1.0]
@@ -550,6 +552,7 @@ class Gruneisen(FreeEnergy):
 
         ddb_flists = None,
         out_flists = None,
+        elastic_fname = None,
 
         wtq = [1.0],
         temperature = np.arange(0,300,50),
@@ -578,6 +581,10 @@ class Gruneisen(FreeEnergy):
         self.symmetry = symmetry
         if not self.symmetry:
             raise Exception('Symmetry type must be specified')
+
+        if self.symmetry=='hexagonal':
+            if not self.elastic_fname:
+                raise Exception('For hexagonal system, elastic compliance tensor (computed with anaddb) must be provided as a .nc file.')
 
         super(Gruneisen,self).__init__(rootname,units)
 #        self.check_anaddb = check_anaddb
@@ -660,6 +667,9 @@ class Gruneisen(FreeEnergy):
                 # get Ftherm contribution
                 F_T += self.wtq[i]*self.get_fthermal(ddb.omega,nmode)
 
+        # Add a check for the right volumes ordering?
+        # cubic : aminus equil aplus
+        #hexagonal : aminus equil aplus cminus equil cplus
                 
 #            self.free_energy[v,:] = (E+F_0)*np.ones((self.ntemp)) + F_T
 
@@ -795,6 +805,24 @@ class Gruneisen(FreeEnergy):
                 plt.show()
 
             return gru 
+
+        if self.symmetry == 'hexagonal':
+            
+            gru = np.zeros((2,nqpt,nmode)) # Gru_a, Gru_c
+
+            for q,v in itt.product(range(nqpt),range(nmode)):
+
+                if q==0 and v<3:
+                # put Gruneisen at zero for acoustic modes at Gamma
+                    gru[:,q,v] = 0
+                else:
+#                    gru[q,v] = -1*np.polyfit(np.log(self.volume[:,1]), np.log(self.omega[:,q,v]),1)[0]
+                    # This is the LINEAR gruneisen parameters
+                    gru[0,q,v] = -self.volume[1,1]/self.omega[1,q,v]*np.polyfit(self.volume[:3,1],self.omega[:3,q,v],1)[0]
+                    gru[1,q,v] = -self.volume[1,3]/self.omega[1,q,v]*np.polyfit(self.volume[3:,3],self.omega[3:,q,v],1)[0]
+
+                    # This is the VOLUMIC one (that is, gru(linear)/3)
+#
             
     def get_acell(self, nqpt, nmode):
 
@@ -859,6 +887,53 @@ class Gruneisen(FreeEnergy):
 
             return a
 
+        if self.symmetry == 'hexagonal':
+            
+            
+            plot = False
+
+            # Read elastic compliance from file
+            elastic = ElasticFile(self.elastic_fname)
+            self.compliance = elastic.compliance_relaxed
+
+            # First, get alpha(T)
+
+            # Get Bose-Einstein factor and specific heat Cv
+            self.bose = np.zeros((nqpt,nmode, self.ntemp))
+            cv = np.zeros((nqpt,nmode,self.ntemp))
+
+            for i,n in itt.product(range(nqpt),range(nmode)):
+                self.bose[i,n,:] = self.get_bose(self.omega[1,i,n],self.temperature)
+                cv[i,n,:] = self.get_specific_heat(self.omega[1,i,n],self.temperature)
+
+#            x = np.zeros((nqpt,nmode,self.ntemp)) # q,v,t
+
+#            for t in range(self.ntemp):
+#                x[:,:,t] = self.omega[1,:,:]/(cst.kb_haK*self.temperature[t])
+#            cv = cst.kb_haK*x**2*np.exp(x)/(np.exp(x)-1)**2
+           # bose = self.get_bose() 
+            #bose = 1./(np.exp(x)-1)
+            #bose[0,:3,:] = 0 # Check what Gabriel did)
+            hwt = np.einsum('qv,qvt->qvt',self.omega[1,:,:],self.bose)
+            # fix this properly later!!! 
+            #cv[0,:3,:] = 0
+
+            
+            # Get alpha_a,c with compliance 
+            alpha_a = ( (self.compliance[0,0]+self.compliance[0,1])*np.einsum('q,qvt,qv->t',self.wtq,cv,self.gruneisen[0,:,:]) +
+                self.compliance[0,2]*np.einsum('q,qvt,qv->t',self.wtq,cv,self.gruneisen[1,:,:]))/self.volume[1,0]
+            alpha_c = ( 2*self.compliance[0,2]*np.einsum('q,qvt,qv->t',self.wtq,cv,self.gruneisen[0,:,:]) +
+                self.compliance[2,2]*np.einsum('q,qvt,qv->t',self.wtq,cv,self.gruneisen[1,:,:])a/self.volume[1,0])
+
+
+            # Then, get a(T)
+            integral = 1./(self.bulk_modulus*self.volume[1,0])*np.einsum('q,qvt,qv->t',self.wtq,hwt,self.gruneisen)
+            a = self.volume[1,1]*(integral + 1)
+
+            return a
+
+
+
     def get_phonon_effective_pressure(self,nqpt,nmode):
 
         # This function computes the phonon "effective pressure", that is, 
@@ -867,14 +942,19 @@ class Gruneisen(FreeEnergy):
         if self.symmetry == 'cubic':
 
             boseplushalf = self.bose + 0.5*np.ones((np.shape(self.bose)))
-            #NOT w^2!!!?!?!? if it is not w^2, I have a much too big result...
-            pph = -1*np.einsum('qv,qvt,qv->t',self.omega[1,:,:],self.bose,self.gruneisen)/self.volume[1,1]
-            pph2 = -1*np.einsum('qv,qvt,qv->t',self.omega[1,:,:],boseplushalf,self.gruneisen)/self.volume[1,1]
+            #RVolumic Gruneisens 
+#            pph = -1*np.einsum('qv,qvt,qv->t',self.omega[1,:,:],self.bose,self.gruneisen)/self.volume[1,0]
+#            pph2 = -1*np.einsum('qv,qvt,qv->t',self.omega[1,:,:],boseplushalf,self.gruneisen)/self.volume[1,0]
+            # Linear Gruneisens
+            pph = -1*np.einsum('qv,qvt,qv->t',self.omega[1,:,:],self.bose,self.gruneisen/3.)/self.volume[1,0]
+            pph2 = -1*np.einsum('qv,qvt,qv->t',self.omega[1,:,:],boseplushalf,self.gruneisen/3.)/self.volume[1,0]
 
 
             for t,T in enumerate(self.temperature):
                 print('T={}K, Pphonon = {} GPa'.format(T,pph[t]*cst.habo3_to_gpa))
                 print('T={}K, Pphonon (+1/2) = {} GPa'.format(T,pph2[t]*cst.habo3_to_gpa))
+                #print('T={}K, Pphonon = {} ha/bo^3'.format(T,pph[t]))
+                #print('T={}K, Pphonon (+1/2) = {} ha/bo/3'.format(T,pph2[t]))
 
             return pph
 
@@ -1268,6 +1348,7 @@ def compute(
         #Input files
         ddb_flists = None,
         out_flists = None,
+        elastic_fname = None,
         etotal_flist = None,
         gap_fname = None,
         rootname = 'te2.out',
@@ -1349,6 +1430,7 @@ def compute(
                     temperature = temperature,
                     units = units,
                     check_anaddb = check_anaddb,
+                    elastic_fname = elastic_fname,
         
                     bulk_modulus = bulk_modulus,
                     bulk_modulus_units = bulk_modulus_units,
