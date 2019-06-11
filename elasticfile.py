@@ -23,9 +23,9 @@ class ElasticFile(EpcFile):
 
         with nc.Dataset(fname, 'r') as root:
 
-            self.stiffness_relaxed = root.variables['elastic_constants_relaxed_ion'][:,:]/gpa_to_habo3
-            self.stiffness_clamped = root.variables['elastic_constants_clamped_ion'][:,:]/gpa_to_habo3
-            self.compliance_relaxed = root.variables['elastic_constants_relaxed_ion'][:,:]/gpa_to_habo3
-            self.compliance_clamped = root.variables['elastic_constants_clamped_ion'][:,:]/gpa_to_habo3
+            self.stiffness_relaxed = root.variables['elastic_constants_relaxed_ion'][:,:]
+            self.stiffness_clamped = root.variables['elastic_constants_clamped_ion'][:,:]
+            self.compliance_relaxed = root.variables['compliance_constants_relaxed_ion'][:,:]/gpa_to_habo3
+            self.compliance_clamped = root.variables['compliance_constants_clamped_ion'][:,:]/gpa_to_habo3
 
         
