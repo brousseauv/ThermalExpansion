@@ -789,21 +789,45 @@ class Gruneisen(FreeEnergy):
             return fit
 
         if self.symmetry == 'hexagonal':
+            
+            from scipy.optimize import leastsq
 
             fit = np.zeros((2,self.ntemp))
+            fit2d = np.zeros((2,self.ntemp))
 
             for t, T in enumerate(self.temperature):
                 afit = np.polyfit(self.volume[:3,1],self.free_energy[:3,t],2)
                 fit[0,t] = -afit[1]/(2*afit[0])
                 cfit = np.polyfit(self.volume[3:,3],self.free_energy[3:,t],2)
-                fit[0,t] = -cfit[1]/(2*cfit[0])
+                fit[1,t] = -cfit[1]/(2*cfit[0])
 
-                fit2 = 
+                
+                fit2, cov2 = leastsq(self.residuals, x0=[afit[0],afit[0],cfit[0],cfit[0]], args=(self.volume[:,1],self.volume[:,3], self.free_energy[:,t]))
+                fit2d[:,t] = fit2[0],fit2[2]
+                print('\nT={}'.format(T))
+                print(fit2)
+                print(cov2)
+
             self.independent_fit = fit
+#            print(fit)
 
             return fit
 
-    def paraboloid(self, a0,
+    def paraboloid(self, x,y, p0):
+
+        a0 = p0[0]
+        A = p0[1]
+        c0 = p0[2]
+        C = p0[3]
+
+        z = (x-a0)**2/A**2 + (y-c0)**2/C**2
+
+        return z
+
+    def residuals(self,params,x,y,z):
+        # params = [a0,A,c0,C]
+        return z - self.paraboloid(x,y,params)
+ 
 
     def get_gruneisen(self, nqpt, nmode,nvol):
 
