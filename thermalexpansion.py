@@ -745,7 +745,7 @@ class Gruneisen(FreeEnergy):
         if self.elastic_fname:
             elastic = ElasticFile(self.elastic_fname)
             self.compliance = elastic.compliance_relaxed
-#            self.compliance = elastic.compliance_clamped
+            self.compliance_rigid = elastic.compliance_clamped
     #            print(self.compliance[0,0],self.compliance[0,1],self.compliance[0,2],self.compliance[2,2])
 
             print(elastic.stiffness_relaxed)
@@ -795,6 +795,12 @@ class Gruneisen(FreeEnergy):
             fit = np.zeros((2,self.ntemp))
             fit2d = np.zeros((2,self.ntemp))
 
+            plot = False
+
+            if plot:
+                import matplotlib.pyplot as plt
+                from mpl_toolkits.mplot3d import Axes3D
+
             for t, T in enumerate(self.temperature):
                 afit = np.polyfit(self.volume[:3,1],self.free_energy[:3,t],2)
                 fit[0,t] = -afit[1]/(2*afit[0])
@@ -802,14 +808,27 @@ class Gruneisen(FreeEnergy):
                 fit[1,t] = -cfit[1]/(2*cfit[0])
 
                 
-                fit2, cov2 = leastsq(self.residuals, x0=[afit[0],afit[0],cfit[0],cfit[0]], args=(self.volume[:,1],self.volume[:,3], self.free_energy[:,t]))
+                fit2, cov2 = leastsq(self.residuals, x0=[afit[0],afit[0],cfit[0],cfit[0],self.free_energy[1,t]], args=(self.volume[:,1],self.volume[:,3], self.free_energy[:,t]))
                 fit2d[:,t] = fit2[0],fit2[2]
                 print('\nT={}'.format(T))
                 print(fit2)
                 print(cov2)
 
+                if plot:
+                    fig = plt.figure()
+                    arr = fig.add_subplot(111,projection='3d')
+                    arr.plot(self.volume[:,1],self.volume[:,3],self.free_energy[:,t],marker='o',color='k',linestyle='None') #at T=0
+                    xmesh = np.linspace(0.99*self.volume[0,1],1.01*self.volume[2,1],200)
+                    ymesh = np.linspace(0.99*self.volume[3,3],1.01*self.volume[5,3],200)
+                    xmesh,ymesh = np.meshgrid(xmesh,ymesh)
+                    zmesh = self.paraboloid(xmesh,ymesh,p0=fit2)
+                    arr.plot_wireframe(xmesh,ymesh,zmesh)
+
+                    plt.show()
+                    plt.close()
+
             self.independent_fit = fit
-#            print(fit)
+            self.fit2d = fit2d 
 
             return fit
 
@@ -819,8 +838,9 @@ class Gruneisen(FreeEnergy):
         A = p0[1]
         c0 = p0[2]
         C = p0[3]
+        B = p0[4]
 
-        z = (x-a0)**2/A**2 + (y-c0)**2/C**2
+        z = (x-a0)**2/A**2 + (y-c0)**2/C**2 + B
 
         return z
 
@@ -1121,15 +1141,10 @@ class Gruneisen(FreeEnergy):
             alpha_c = ( 2*self.compliance[0,2]*np.einsum('q,qvt,qv->t',self.wtq,cv,self.gruneisen[0,:,:]) +
                 self.compliance[2,2]*np.einsum('q,qvt,qv->t',self.wtq,cv,self.gruneisen[1,:,:]))/self.equilibrium_volume[0]
 
-
-#            alpha_a2 = np.einsum('q,qvt,qv->t',self.wtq,cv,self.gruneisen[0,:,:])/(self.equilibrium_volume[0]*self.bulk_modulus)
-            alpha_a2 = ( (self.compliance[0,0]+self.compliance[0,1])*np.einsum('q,qvt,qv->t',self.wtq,cv,self.gruneisen[0,:,:]/2.) +
-                self.compliance[0,2]*np.einsum('q,qvt,qv->t',self.wtq,cv,self.gruneisen[1,:,:]))/self.equilibrium_volume[0]
-
-#            alpha_c2 = np.einsum('q,qvt,qv->t',self.wtq,cv,self.gruneisen[1,:,:])/(self.equilibrium_volume[0]*self.bulk_modulus)
-            alpha_c2 = ( 2*self.compliance[0,2]*np.einsum('q,qvt,qv->t',self.wtq,cv,self.gruneisen[0,:,:]/2.) +
-                self.compliance[2,2]*np.einsum('q,qvt,qv->t',self.wtq,cv,self.gruneisen[1,:,:]))/self.equilibrium_volume[0]
-
+            alpha_a2 = ( (self.compliance_rigid[0,0]+self.compliance_rigid[0,1])*np.einsum('q,qvt,qv->t',self.wtq,cv,self.gruneisen[0,:,:]) +
+                self.compliance_rigid[0,2]*np.einsum('q,qvt,qv->t',self.wtq,cv,self.gruneisen[1,:,:]))/self.equilibrium_volume[0]
+            alpha_c2 = ( 2*self.compliance_rigid[0,2]*np.einsum('q,qvt,qv->t',self.wtq,cv,self.gruneisen[0,:,:]) +
+                self.compliance_rigid[2,2]*np.einsum('q,qvt,qv->t',self.wtq,cv,self.gruneisen[1,:,:]))/self.equilibrium_volume[0]
 
 
             # Then, get a(T) and c(T)
@@ -1142,40 +1157,44 @@ class Gruneisen(FreeEnergy):
             c = 2*self.compliance[0,2]*integral_a + self.compliance[2,2]*integral_c
             c = self.equilibrium_volume[3]*(c/self.equilibrium_volume[0] + 1)
 
-            a2 = (self.compliance[0,0]+self.compliance[0,1])*integral_a/2. + self.compliance[0,2]*integral_c
-            a2 = self.equilibrium_volume[1]*(a2/(self.equilibrium_volume[0]) + 1)
+            a2 = (self.compliance_rigid[0,0]+self.compliance[0,1])*integral_a + self.compliance[0,2]*integral_c
+            a2 = self.equilibrium_volume[1]*(a2/self.equilibrium_volume[0] + 1)
 
-            c2 = 2*self.compliance[0,2]*integral_a/2. + self.compliance[2,2]*integral_c
+            c2 = 2*self.compliance_rigid[0,2]*integral_a + self.compliance[2,2]*integral_c
             c2 = self.equilibrium_volume[3]*(c2/self.equilibrium_volume[0] + 1)
 
 
             acell = np.array([a,c])
-            self.acell2 = np.array([a2,c2])
+#            self.acell2 = np.array([a2,c2])
 
             if plot:
                 import matplotlib.pyplot as plt
                 fig,arr = plt.subplots(2,2,figsize=(10,10),sharey=False)
-                arr[0,0].plot(self.temperature,alpha_a*1E6,'r',label='a') 
-#                arr[0,0].plot(self.temperature,alpha_a2*1E6,'r:')
+                arr[0,0].plot(self.temperature,alpha_a*1E6,'r',label='relaxed') 
+                arr[0,0].plot(self.temperature,alpha_a2*1E6,'g',label='rigid') 
+
 #                twin0 = arr[0].twinx()
 #                twin0.plot(self.temperature,alpha_c*1E6,'b',label='c') 
-                arr[1,0].plot(self.temperature,alpha_c*1E6,'b',label='c') 
+                arr[1,0].plot(self.temperature,alpha_c*1E6,'b',label='relaxed') 
+                arr[1,0].plot(self.temperature,alpha_c2*1E6,'g',label='rigid') 
+
 
                 arr[0,0].set_ylabel(r'$\alpha_a$ ($10^{-6}$ K$^{-1}$)',color='r')
                 arr[1,0].set_ylabel(r'$\alpha_c$ ($10^{-6}$ K$^{-1}$)',color='b')
-#                arr[1,0].plot(self.temperature,alpha_c2*1E6,'b:')
 
                 arr[0,0].set_xlabel(r'Temperature (K)')
 #                arr[0].legend()
                 arr[1,0].set_xlabel(r'Temperature (K)')
 #                arr[0].set_title(r'Expansion coefficients') 
 #                arr[1].set_title(r'Lattice parameters')
-                arr[0,1].plot(self.temperature, a*cst.bohr_to_ang,'r')
-#                arr[0,1].plot(self.temperature, a2*cst.bohr_to_ang,'r:')
+                arr[0,1].plot(self.temperature, a*cst.bohr_to_ang,'r',label='relaxed')
+                arr[0,1].plot(self.temperature, a2*cst.bohr_to_ang,'g',label='rigid')
+
 
 #                twin1 = arr[1].twinx()
-                arr[1,1].plot(self.temperature,c*cst.bohr_to_ang,'b')
-#                arr[1,1].plot(self.temperature,c2*cst.bohr_to_ang,'b:')
+                arr[1,1].plot(self.temperature,c*cst.bohr_to_ang,'b',label='relaxed')
+                arr[1,1].plot(self.temperature,c2*cst.bohr_to_ang,'g',label='rigid')
+
 
                 #arr[2].plot(self.temperature-273, a*cst.bohr_to_ang, 'or')
                 arr[0,1].set_ylabel(r'a (ang)',color='r')
@@ -1196,19 +1215,31 @@ class Gruneisen(FreeEnergy):
 
 
                 # Reeber 1999 data
-                reeber_alphaA = EXPfile('/Users/Veronique/Google_Drive/doctorat/work/TI/GaN/TE/GaN_alphaAT_Reeber1999.nc')
+                reeber_alphaA = EXPfile('/Users/veroniquebrousseau/Google_Drive/doctorat/work/TI/GaN/TE/data/GaN_alphaAT_Reeber1999.nc')
                 reeber_alphaA.read_nc()
-                reeber_alphaC = EXPfile('/Users/Veronique/Google_Drive/doctorat/work/TI/GaN/TE/GaN_alphaCT_Reeber1999.nc')
+                reeber_alphaC = EXPfile('/Users/veroniquebrousseau/Google_Drive/doctorat/work/TI/GaN/TE/data/GaN_alphaCT_Reeber1999.nc')
                 reeber_alphaC.read_nc()
-                reeber_a = EXPfile('/Users/Veronique/Google_Drive/doctorat/work/TI/GaN/TE/GaN_aT_Reeber1999.nc')
+                reeber_a = EXPfile('/Users/veroniquebrousseau/Google_Drive/doctorat/work/TI/GaN/TE/data/GaN_aT_Reeber1999.nc')
                 reeber_a.read_nc()
-                reeber_c = EXPfile('/Users/Veronique/Google_Drive/doctorat/work/TI/GaN/TE/GaN_cT_Reeber1999.nc')
+                reeber_c = EXPfile('/Users/veroniquebrousseau/Google_Drive/doctorat/work/TI/GaN/TE/data/GaN_cT_Reeber1999.nc')
                 reeber_c.read_nc()
 
                 arr[0,0].plot(reeber_alphaA.xaxis, reeber_alphaA.yaxis,'xr',label='Reeber1999')
                 arr[1,0].plot(reeber_alphaC.xaxis, reeber_alphaC.yaxis,'xb',label='Reeber1999')
                 arr[0,1].plot(reeber_a.xaxis, reeber_a.yaxis,'xr',label='Reeber1999')
                 arr[1,1].plot(reeber_c.xaxis, reeber_c.yaxis,'xb',label='Reeber1999')
+
+                arr[0,1].plot(self.temperature,self.independent_fit[0,:]*cst.bohr_to_ang,'go',markersize=7,label='ind_fit')
+                arr[1,1].plot(self.temperature,self.independent_fit[1,:]*cst.bohr_to_ang,'go',markersize=7,label='ind_fit')
+                arr[0,1].plot(self.temperature,self.fit2d[0,:]*cst.bohr_to_ang,'mo',markersize=5,label='fit2d')
+                arr[1,1].plot(self.temperature,self.fit2d[1,:]*cst.bohr_to_ang,'mo',markersize=5,label='fit2d')
+
+                deltaa = (a[0]*cst.bohr_to_ang-reeber_a.yaxis[0])*np.ones(self.ntemp)
+                deltac = (c[0]*cst.bohr_to_ang-reeber_c.yaxis[0])*np.ones(self.ntemp)
+
+                arr[0,1].plot(self.temperature,a*cst.bohr_to_ang-deltaa,'r',linestyle='dashed',label='shifted to exp.')
+                arr[1,1].plot(self.temperature,c*cst.bohr_to_ang-deltac,'b',linestyle='dashed',label='shifted to exp.')
+
 
                 for a1 in range(2):
                     for a2 in range(2):
@@ -1234,7 +1265,8 @@ class Gruneisen(FreeEnergy):
 #                twin1.plot(t,cfit,'b:')
 
 
-#                plt.savefig('alpha_GaAs.png')
+                plt.suptitle(r'GaN wurtzite')
+                plt.savefig('GaN_TE.png')
                 plt.show() 
             
 #            for t,T in enumerate(self.temperature):
@@ -1292,12 +1324,12 @@ class Gruneisen(FreeEnergy):
             sum_a = np.einsum('q,qv,qvt,qv->t',self.wtq,self.omega[1,:,:],self.bose,self.gruneisen[0,:,:]/3.)
             sum_c = np.einsum('q,qv,qvt,qv->t',self.wtq,self.omega[1,:,:],self.bose,self.gruneisen[1,:,:]/3.)
 
-            pph_a = -1*np.einsum('q,qv,qvt,qv->t',self.wtq,self.omega[1,:,:],self.bose,self.gruneisen[0,:,:]/3.)/self.volume[1,0]
+            pph_a = -1*np.einsum('q,qv,qvt,qv->t',self.wtq,self.omega[1,:,:],self.bose,self.gruneisen[0,:,:])/self.equilibrium_volume[0]
 
-            pph_a2 = -1*np.einsum('qv,qvt,qv->t',self.omega[1,:,:],boseplushalf,self.gruneisen[0,:,:]/3.)/self.volume[1,0]
+            pph_a2 = -1*np.einsum('qv,qvt,qv->t',self.omega[1,:,:],boseplushalf,self.gruneisen[0,:,:]/3.)/self.equilibrium_volume[0]
 
-            pph_c = -1*np.einsum('q,qv,qvt,qv->t',self.wtq,self.omega[1,:,:],self.bose,self.gruneisen[1,:,:]/3.)/self.volume[1,0]
-            pph_c2 = -1*np.einsum('qv,qvt,qv->t',self.omega[1,:,:],boseplushalf,self.gruneisen[1,:,:]/3.)/self.volume[1,0]
+            pph_c = -1*np.einsum('q,qv,qvt,qv->t',self.wtq,self.omega[1,:,:],self.bose,self.gruneisen[1,:,:]/3.)/self.equilibrium_volume[0]
+            pph_c2 = -1*np.einsum('qv,qvt,qv->t',self.omega[1,:,:],boseplushalf,self.gruneisen[1,:,:]/3.)/self.equilibrium_volume[0]
 
 
 
