@@ -811,8 +811,10 @@ class Gruneisen(FreeEnergy):
                 fit2, cov2 = leastsq(self.residuals, x0=[afit[0],afit[0],cfit[0],cfit[0],self.free_energy[1,t]], args=(self.volume[:,1],self.volume[:,3], self.free_energy[:,t]))
                 fit2d[:,t] = fit2[0],fit2[2]
                 print('\nT={}'.format(T))
-                print(fit2)
-                print(cov2)
+                #print(fit2)
+                #print(cov2)
+                print(fit[:,t])
+                print(fit2d[:,t])
 
                 if plot:
                     fig = plt.figure()
@@ -1109,7 +1111,7 @@ class Gruneisen(FreeEnergy):
         if self.symmetry == 'hexagonal':
             
             
-            plot = True
+            plot = False
 
            
 
@@ -1215,13 +1217,13 @@ class Gruneisen(FreeEnergy):
 
 
                 # Reeber 1999 data
-                reeber_alphaA = EXPfile('/Users/veroniquebrousseau/Google_Drive/doctorat/work/TI/GaN/TE/data/GaN_alphaAT_Reeber1999.nc')
+                reeber_alphaA = EXPfile('/Users/Veronique/Google_Drive/doctorat/work/TI/GaN/TE/data/GaN_alphaAT_Reeber1999.nc')
                 reeber_alphaA.read_nc()
-                reeber_alphaC = EXPfile('/Users/veroniquebrousseau/Google_Drive/doctorat/work/TI/GaN/TE/data/GaN_alphaCT_Reeber1999.nc')
+                reeber_alphaC = EXPfile('/Users/Veronique/Google_Drive/doctorat/work/TI/GaN/TE/data/GaN_alphaCT_Reeber1999.nc')
                 reeber_alphaC.read_nc()
-                reeber_a = EXPfile('/Users/veroniquebrousseau/Google_Drive/doctorat/work/TI/GaN/TE/data/GaN_aT_Reeber1999.nc')
+                reeber_a = EXPfile('/Users/Veronique/Google_Drive/doctorat/work/TI/GaN/TE/data/GaN_aT_Reeber1999.nc')
                 reeber_a.read_nc()
-                reeber_c = EXPfile('/Users/veroniquebrousseau/Google_Drive/doctorat/work/TI/GaN/TE/data/GaN_cT_Reeber1999.nc')
+                reeber_c = EXPfile('/Users/Veronique/Google_Drive/doctorat/work/TI/GaN/TE/data/GaN_cT_Reeber1999.nc')
                 reeber_c.read_nc()
 
                 arr[0,0].plot(reeber_alphaA.xaxis, reeber_alphaA.yaxis,'xr',label='Reeber1999')
@@ -1229,10 +1231,37 @@ class Gruneisen(FreeEnergy):
                 arr[0,1].plot(reeber_a.xaxis, reeber_a.yaxis,'xr',label='Reeber1999')
                 arr[1,1].plot(reeber_c.xaxis, reeber_c.yaxis,'xb',label='Reeber1999')
 
-                arr[0,1].plot(self.temperature,self.independent_fit[0,:]*cst.bohr_to_ang,'go',markersize=7,label='ind_fit')
-                arr[1,1].plot(self.temperature,self.independent_fit[1,:]*cst.bohr_to_ang,'go',markersize=7,label='ind_fit')
+                arr[0,1].plot(self.temperature,self.independent_fit[0,:]*cst.bohr_to_ang,'go',markersize=7,label=r'ind\_fit')
+                arr[1,1].plot(self.temperature,self.independent_fit[1,:]*cst.bohr_to_ang,'go',markersize=7,label=r'ind\_fit')
                 arr[0,1].plot(self.temperature,self.fit2d[0,:]*cst.bohr_to_ang,'mo',markersize=5,label='fit2d')
                 arr[1,1].plot(self.temperature,self.fit2d[1,:]*cst.bohr_to_ang,'mo',markersize=5,label='fit2d')
+
+                roder_a = EXPfile('/Users/Veronique/Google_Drive/doctorat/work/TI/GaN/TE/data/GaN_aT_Roder2005.nc')
+                roder_a.read_nc()
+                roder_a1 = EXPfile('/Users/Veronique/Google_Drive/doctorat/work/TI/GaN/TE/data/GaN_aT_Roder2005_ref1.nc')
+                roder_a1.read_nc()
+                roder_a4 = EXPfile('/Users/Veronique/Google_Drive/doctorat/work/TI/GaN/TE/data/GaN_aT_Roder2005_ref4.nc')
+                roder_a4.read_nc()
+                roder_a6 = EXPfile('/Users/Veronique/Google_Drive/doctorat/work/TI/GaN/TE/data/GaN_aT_Roder2005_ref6.nc')
+                roder_a6.read_nc()
+                roder_c = EXPfile('/Users/Veronique/Google_Drive/doctorat/work/TI/GaN/TE/data/GaN_cT_Roder2005.nc')
+                roder_c.read_nc()
+                roder_c1 = EXPfile('/Users/Veronique/Google_Drive/doctorat/work/TI/GaN/TE/data/GaN_cT_Roder2005_ref1.nc')
+                roder_c1.read_nc()
+                roder_c4 = EXPfile('/Users/Veronique/Google_Drive/doctorat/work/TI/GaN/TE/data/GaN_cT_Roder2005_ref4.nc')
+                roder_c4.read_nc()
+                roder_c6 = EXPfile('/Users/Veronique/Google_Drive/doctorat/work/TI/GaN/TE/data/GaN_cT_Roder2005_ref6.nc')
+                roder_c6.read_nc()
+
+                arr[0,1].plot(roder_a.xaxis, roder_a.yaxis,'vk',label='Roder2005')
+                arr[1,1].plot(roder_c.xaxis, roder_c.yaxis,'vk',label='Roder2005')
+                arr[0,1].plot(roder_a1.xaxis, roder_a1.yaxis,'Pk',label='Roder2005-ref1')
+                arr[1,1].plot(roder_c1.xaxis, roder_c1.yaxis,'Pk',label='Roder2005-ref1')
+                arr[0,1].plot(roder_a4.xaxis, roder_a4.yaxis,'sk',label='Roder2005-ref4')
+                arr[1,1].plot(roder_c4.xaxis, roder_c4.yaxis,'sk',label='Roder2005-ref4')
+                arr[0,1].plot(roder_a6.xaxis, roder_a6.yaxis,'*k',label='Roder2005-ref6')
+                arr[1,1].plot(roder_c6.xaxis, roder_c6.yaxis,'*k',label='Roder2005-ref6')
+
 
                 deltaa = (a[0]*cst.bohr_to_ang-reeber_a.yaxis[0])*np.ones(self.ntemp)
                 deltac = (c[0]*cst.bohr_to_ang-reeber_c.yaxis[0])*np.ones(self.ntemp)
@@ -1241,9 +1270,10 @@ class Gruneisen(FreeEnergy):
                 arr[1,1].plot(self.temperature,c*cst.bohr_to_ang-deltac,'b',linestyle='dashed',label='shifted to exp.')
 
 
+                plt.subplots_adjust(left=0.05,right=0.85,hspace=0.05)
                 for a1 in range(2):
-                    for a2 in range(2):
-                        arr[a1,a2].legend(numpoints=1)
+                    arr[a1,0].legend(numpoints=1)
+                    arr[a1,1].legend(numpoints=1,loc=10,bbox_to_anchor=(1.2,0.5))
 
 #                # Set axis color
 #                arr[0].spines["left"].set_edgecolor('red')
@@ -1266,7 +1296,7 @@ class Gruneisen(FreeEnergy):
 
 
                 plt.suptitle(r'GaN wurtzite')
-                plt.savefig('GaN_TE.png')
+                #plt.savefig('GaN_TE.png')
                 plt.show() 
             
 #            for t,T in enumerate(self.temperature):
@@ -1321,21 +1351,34 @@ class Gruneisen(FreeEnergy):
 #            pph = -1*np.einsum('qv,qvt,qv->t',self.omega[1,:,:],self.bose,self.gruneisen)/self.volume[1,0]
 #            pph2 = -1*np.einsum('qv,qvt,qv->t',self.omega[1,:,:],boseplushalf,self.gruneisen)/self.volume[1,0]
             # Linear Gruneisens
-            sum_a = np.einsum('q,qv,qvt,qv->t',self.wtq,self.omega[1,:,:],self.bose,self.gruneisen[0,:,:]/3.)
-            sum_c = np.einsum('q,qv,qvt,qv->t',self.wtq,self.omega[1,:,:],self.bose,self.gruneisen[1,:,:]/3.)
+            sum_a = np.einsum('q,qv,qvt,qv->t',self.wtq,self.omega[1,:,:],self.bose,self.gruneisen[0,:,:])
+            sum_c = np.einsum('q,qv,qvt,qv->t',self.wtq,self.omega[1,:,:],self.bose,self.gruneisen[1,:,:])
 
-            pph_a = -1*np.einsum('q,qv,qvt,qv->t',self.wtq,self.omega[1,:,:],self.bose,self.gruneisen[0,:,:])/self.equilibrium_volume[0]
+#            pph_a = -1*np.einsum('q,qv,qvt,qv->t',self.wtq,self.omega[1,:,:],self.bose,self.gruneisen[0,:,:])/self.equilibrium_volume[0]
+#
+#            pph_a2 = -1*np.einsum('qv,qvt,qv->t',self.omega[1,:,:],boseplushalf,self.gruneisen[0,:,:]/3.)/self.equilibrium_volume[0]
+#
+#            pph_c = -1*np.einsum('q,qv,qvt,qv->t',self.wtq,self.omega[1,:,:],self.bose,self.gruneisen[1,:,:]/3.)/self.equilibrium_volume[0]
+#            pph_c2 = -1*np.einsum('qv,qvt,qv->t',self.omega[1,:,:],boseplushalf,self.gruneisen[1,:,:]/3.)/self.equilibrium_volume[0]
+            pph_a = -1*((self.compliance[0,0]+self.compliance[0,1])*sum_a + self.compliance[0,2]*sum_c)/self.equilibrium_volume[0]
+            pph_c = -1*(2*self.compliance[0,2]*sum_a + self.compliance[2,2]*sum_c)/self.equilibrium_volume[0]
 
-            pph_a2 = -1*np.einsum('qv,qvt,qv->t',self.omega[1,:,:],boseplushalf,self.gruneisen[0,:,:]/3.)/self.equilibrium_volume[0]
+            pph_a2 =( -1./3)*((self.compliance[0,0]+self.compliance[0,1])*sum_a + self.compliance[0,2]*sum_c)/self.equilibrium_volume[0]
+            pph_c2 = (-1./3)*(2*self.compliance[0,2]*sum_a + self.compliance[2,2]*sum_c)/self.equilibrium_volume[0]
 
-            pph_c = -1*np.einsum('q,qv,qvt,qv->t',self.wtq,self.omega[1,:,:],self.bose,self.gruneisen[1,:,:]/3.)/self.equilibrium_volume[0]
-            pph_c2 = -1*np.einsum('qv,qvt,qv->t',self.omega[1,:,:],boseplushalf,self.gruneisen[1,:,:]/3.)/self.equilibrium_volume[0]
+            pph_as = -1*sum_a/self.equilibrium_volume[0]
+            pph_cs = -1*sum_c/self.equilibrium_volume[0]
 
 
 
 
-#            for t,T in enumerate(self.temperature):
-#                print('\nT={}K, Pphonon_a = {} GPa'.format(T,pph_a[t]*cst.habo3_to_gpa))
+            for t,T in enumerate(self.temperature):
+                print('\nt={}k, pphonon_a = {} gpa = {} ha/bo^3'.format(T,pph_a[t]*cst.habo3_to_gpa,pph_a[t]))
+                print('    pphonon_c = {} gpa = {} ha/bo^3'.format(pph_c[t]*cst.habo3_to_gpa,pph_c[t]))
+                print('    pphonon_a2 = {} gpa = {} ha/bo^3'.format(pph_a2[t]*cst.habo3_to_gpa,pph_a2[t]))
+                print('    pphonon_c2 = {} gpa = {} ha/bo^3'.format(pph_c2[t]*cst.habo3_to_gpa,pph_c2[t]))
+                print('    pphonon_as = {} gpa = {} ha/bo^3'.format(pph_as[t]*cst.habo3_to_gpa,pph_as[t]))
+                print('    pphonon_cs = {} gpa = {} ha/bo^3'.format(pph_cs[t]*cst.habo3_to_gpa,pph_cs[t]))
 
 #                print('T={}K, Pphonon_a (+1/2) = {} GPa'.format(T,pph_a2[t]*cst.habo3_to_gpa))
 #                print('T={}K, Pphonon_c = {} GPa'.format(T,pph_c[t]*cst.habo3_to_gpa))
