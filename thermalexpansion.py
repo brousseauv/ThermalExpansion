@@ -1510,6 +1510,49 @@ class Gruneisen(FreeEnergy):
         return gru
 
 
+    def write_acell(self):
+
+        outfile = '{}_acell_from_gruneisen.dat'.format(self.rootname)
+        nc_outfile = '{}_acell.nc'.format(self.rootname)
+
+        #  First, write output in netCDF format
+        create_directory(nc_outfile)
+
+        with nc.Dataset(nc_outfile, 'w') as dts:
+
+            dts.createDimension('number_of_temperatures', self.ntemp)
+            dts.createDimension('number_of_lattice_parameters', len(self.distinct_acell))
+
+
+            data = dts.createVariable('acell_from_gruneisen','d', ('number_of_lattice_parameters','number_of_temperatures'))
+            data[:,:] = self.acell_via_gruneisen[:,:]
+            data.units = 'Bohr radius'
+
+
+        # Then, write them in ascii file
+        create_directory(outfile)
+
+        with open(outfile, 'w') as f:
+
+            f.write('Temperature dependent lattice parameters via Gruneisen parameters\n\n')
+
+            if self.symmetry == 'cubic':
+
+                f.write('{:12}    {:12}\n'.format('Temperature','a (bohr)'))
+                for t,T in enumerate(self.temperature):
+                    f.write('{:>8.1f} K    {:>12.8f}\n'.format(T,self.acell_via_gruneisen[t]))
+
+                f.close()
+
+
+            if self.symmetry == 'hexagonal':
+
+                f.write('{:12}      {:<12}    {:<12}\n'.format('Temperature','a (bohr)','c (bohr)'))
+                for t,T in enumerate(self.temperature):
+                    f.write('{:>8.1f} K    {:>12.8f}    {:>12.8f}\n'.format(T,self.acell_via_gruneisen[0,t],self.acell_via_gruneisen[1,t]))
+
+                f.close()
+
            
 
 
@@ -1894,7 +1937,8 @@ def compute(
 #    calc.write_freeenergy()
         # write gibbs or helmholtz, equilibrium acells (P,T), list of temperatures, pressures, initial volumes
         # in netcdf format, will allow to load the data for plotting
-#    calc.write_acell()
+        calc.write_acell()
+
        # write equilibrium acells, in ascii file
     return
     
