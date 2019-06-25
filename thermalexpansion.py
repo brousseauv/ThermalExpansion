@@ -19,7 +19,7 @@ from outfile import OutFile
 from gsrfile import GsrFile
 from gapfile import GapFile
 from elasticfile import ElasticFile
-from zpr_plotter import EXPfile
+#from zpr_plotter import EXPfile
 import eos as eos
 
 from matplotlib import rc
@@ -184,11 +184,6 @@ class FreeEnergy(object):
             c12 = elast[0,1]
             c13 = elast[0,2]
             c33 = elast[2,2]
-
-            c11 = 377
-            c12=91 
-            c13=58 
-            c33=405
 
             B0 = ( (c11+c12)*c33-2*c13**2)/(c11+c12+2*c33-4*c13)
 
@@ -638,12 +633,13 @@ class Gruneisen(FreeEnergy):
         self.temperature = temperature
         self.ntemp = len(self.temperature) 
 
-        if bulk_modulus_units == 'GPa':
-            self.bulk_modulus = bulk_modulus*cst.gpa_to_habo3
-        elif bulk_modulus_units == 'HaBo3':
-            self.bulk_modulus = bulk_modulus
-        else:
-            raise Exception('Bulk modulus units must be GPa or Ha/bohr^3')
+        if bulk_modulus:
+            if bulk_modulus_units == 'GPa':
+                self.bulk_modulus = bulk_modulus*cst.gpa_to_habo3
+            elif bulk_modulus_units == 'HaBo3':
+                self.bulk_modulus = bulk_modulus
+            else:
+                raise Exception('Bulk modulus units must be GPa or Ha/bohr^3')
 
         # set parameter space dimensions
         '''why the hell does the shape sometimes work and sometimes not???'''
@@ -710,6 +706,30 @@ class Gruneisen(FreeEnergy):
 
                 # Store frequencies for Gruneisen parameters
                 self.omega[v,i,:] = ddb.omega
+                if v==1:
+                    print(i+1,ddb.omega)
+
+#                    # Manual correction for 0.0gpa
+#                    if i+1==26:
+#                        self.omega[v,i,0] = 0.2854956226E-04
+#                        self.omega[v,i,1] = 0.2854956226E-04
+#                    if i+1==56:
+#                        self.omega[v,i,0] = 0.3932015304E-04
+#                        self.omega[v,i,1] = 0.3932015304E-04
+
+
+#                    # Manual correction for 0.5gpa
+#                    if i+1==26:
+#                        self.omega[v,i,0] = 0.4283688046E-04
+#                        self.omega[v,i,1] = 0.4283688046E-04
+#                    if i+1==56:
+#                        self.omega[v,i,0] = 0.5818795222E-04
+#                        self.omega[v,i,1] = 0.5818795222E-04
+
+#                    # Manual correction for 1gpa
+#                    if i+1==26:
+#                        self.omega[v,i,0] = 0.5350676926E-04
+#                        self.omega[v,i,1] = 0.5350676926E-04
                 # get F0 contribution
                 F_0 += self.wtq[i]*self.get_f0(ddb.omega) 
                 # get Ftherm contribution
@@ -750,9 +770,14 @@ class Gruneisen(FreeEnergy):
             self.compliance_rigid = elastic.compliance_clamped
     #            print(self.compliance[0,0],self.compliance[0,1],self.compliance[0,2],self.compliance[2,2])
 
-            print(elastic.stiffness_relaxed)
+#            print(elastic.stiffness_relaxed)
             bmod = self.get_bulkmodulus_from_elastic(elastic.stiffness_relaxed)
             print('Bulk modulus from elastic constants = {:>7.3f} GPa'.format(bmod))
+            print('Elastic constants:')
+            print('c11 = {}, c33 = {}, c12 = {}, c13 = {} GPa'.format(elastic.stiffness_relaxed[0,0],elastic.stiffness_relaxed[2,2],elastic.stiffness_relaxed[0,1],elastic.stiffness_relaxed[0,2]))
+            print('Compliance constants:')
+            print('s11 = {}, s33 = {}, s12 = {}, s13 = {} GPa^-1'.format(elastic.compliance_relaxed[0,0],elastic.compliance_relaxed[2,2],elastic.compliance_relaxed[0,1],elastic.compliance_relaxed[0,2]))
+
 
         self.gruneisen = self.get_gruneisen(nqpt,nmode,nvol)
         self.acell_via_gruneisen = self.get_acell(nqpt,nmode)
@@ -803,6 +828,8 @@ class Gruneisen(FreeEnergy):
                 import matplotlib.pyplot as plt
                 from mpl_toolkits.mplot3d import Axes3D
 
+
+            print('From free energy minimization')
             for t, T in enumerate(self.temperature):
                 afit = np.polyfit(self.volume[:3,1],self.free_energy[:3,t],2)
                 fit[0,t] = -afit[1]/(2*afit[0])
@@ -855,7 +882,7 @@ class Gruneisen(FreeEnergy):
 
     def get_gruneisen(self, nqpt, nmode,nvol):
 
-        plot = False
+        plot = True
 
         if plot :
             import matplotlib.pyplot as plt
@@ -942,6 +969,7 @@ class Gruneisen(FreeEnergy):
             gru2 = np.zeros((2,nqpt,nmode)) #withfinite difference, on the frequencies
 
 
+            print('volume:',self.volume[:,1],self.volume[:,3])
             for q,v in itt.product(range(nqpt),range(nmode)):
 
                 if q==0 and v<3:
@@ -1010,8 +1038,11 @@ class Gruneisen(FreeEnergy):
 #                        plt.xlabel('ln V')
 #                        plt.ylabel('ln omega')
 
-#                plt.savefig('gruneisen_GaAs2.png')
-                plt.show()
+                outfile = 'FIG/gruneisen_{}.png'.format(self.rootname)
+                create_directory(outfile)
+
+                plt.savefig(outfile)
+#                plt.show()
 
             return gru 
 
@@ -1022,7 +1053,7 @@ class Gruneisen(FreeEnergy):
         # Evaluate acell(T) from Gruneisen parameters
         if self.symmetry == 'cubic':
             
-            plot = True
+            plot = False
             # First, get alpha(T)
 
             # Get Bose-Einstein factor and specific heat Cv
@@ -1135,7 +1166,7 @@ class Gruneisen(FreeEnergy):
         if self.symmetry == 'hexagonal':
             
             
-            plot = True
+            plot = False
 
            
 
@@ -1197,6 +1228,10 @@ class Gruneisen(FreeEnergy):
 
             acell = np.array([a,c])
 #            self.acell2 = np.array([a2,c2])
+
+            print('From Gruneisen parameters')
+            for t,T in enumerate(self.temperature):
+                print('T={}K, a={}, c={}'.format(T,a[t],c[t]))
 
             if plot:
                 import matplotlib.pyplot as plt
@@ -1423,15 +1458,16 @@ class Gruneisen(FreeEnergy):
             pph_cs = -1*sum_c/self.equilibrium_volume[0]
 
 
-
-
-            for t,T in enumerate(self.temperature):
-                print('\nt={}k, pphonon_a = {} gpa = {} ha/bo^3'.format(T,pph_a[t]*cst.habo3_to_gpa,pph_a[t]))
-                print('    pphonon_c = {} gpa = {} ha/bo^3'.format(pph_c[t]*cst.habo3_to_gpa,pph_c[t]))
-                print('    pphonon_a2 = {} gpa = {} ha/bo^3'.format(pph_a2[t]*cst.habo3_to_gpa,pph_a2[t]))
-                print('    pphonon_c2 = {} gpa = {} ha/bo^3'.format(pph_c2[t]*cst.habo3_to_gpa,pph_c2[t]))
-                print('    pphonon_as = {} gpa = {} ha/bo^3'.format(pph_as[t]*cst.habo3_to_gpa,pph_as[t]))
-                print('    pphonon_cs = {} gpa = {} ha/bo^3'.format(pph_cs[t]*cst.habo3_to_gpa,pph_cs[t]))
+            iprint = False
+            if iprint:
+                print('Phonon effective pressure')
+                for t,T in enumerate(self.temperature):
+                    print('\nt={}k, pphonon_a = {} gpa = {} ha/bo^3'.format(T,pph_a[t]*cst.habo3_to_gpa,pph_a[t]))
+                    print('    pphonon_c = {} gpa = {} ha/bo^3'.format(pph_c[t]*cst.habo3_to_gpa,pph_c[t]))
+                    print('    pphonon_a2 = {} gpa = {} ha/bo^3'.format(pph_a2[t]*cst.habo3_to_gpa,pph_a2[t]))
+                    print('    pphonon_c2 = {} gpa = {} ha/bo^3'.format(pph_c2[t]*cst.habo3_to_gpa,pph_c2[t]))
+                    print('    pphonon_as = {} gpa = {} ha/bo^3'.format(pph_as[t]*cst.habo3_to_gpa,pph_as[t]))
+                    print('    pphonon_cs = {} gpa = {} ha/bo^3'.format(pph_cs[t]*cst.habo3_to_gpa,pph_cs[t]))
 
 #                print('T={}K, Pphonon_a (+1/2) = {} GPa'.format(T,pph_a2[t]*cst.habo3_to_gpa))
 #                print('T={}K, Pphonon_c = {} GPa'.format(T,pph_c[t]*cst.habo3_to_gpa))
@@ -1565,8 +1601,8 @@ class Gruneisen(FreeEnergy):
 
     def write_acell(self):
 
-        outfile = '{}_acell_from_gruneisen.dat'.format(self.rootname)
-        nc_outfile = '{}_acell.nc'.format(self.rootname)
+        outfile = 'OUT/{}_acell_from_gruneisen.dat'.format(self.rootname)
+        nc_outfile = 'OUT/{}_acell.nc'.format(self.rootname)
 
         #  First, write output in netCDF format
         create_directory(nc_outfile)
