@@ -19,7 +19,7 @@ from outfile import OutFile
 from gsrfile import GsrFile
 from gapfile import GapFile
 from elasticfile import ElasticFile
-#from zpr_plotter import EXPfile
+from zpr_plotter import EXPfile
 import eos as eos
 
 from matplotlib import rc
@@ -772,7 +772,10 @@ class Gruneisen(FreeEnergy):
 
 #            print(elastic.stiffness_relaxed)
             bmod = self.get_bulkmodulus_from_elastic(elastic.stiffness_relaxed)
+            bmod2 = self.get_bulkmodulus_from_elastic(elastic.stiffness_clamped)
             print('Bulk modulus from elastic constants = {:>7.3f} GPa'.format(bmod))
+            print('Bulk modulus from elastic constants (clamped) = {:>7.3f} GPa'.format(bmod2))
+
             print('Elastic constants:')
             print('c11 = {}, c33 = {}, c12 = {}, c13 = {} GPa'.format(elastic.stiffness_relaxed[0,0],elastic.stiffness_relaxed[2,2],elastic.stiffness_relaxed[0,1],elastic.stiffness_relaxed[0,2]))
             print('Compliance constants:')
@@ -1003,11 +1006,11 @@ class Gruneisen(FreeEnergy):
                 for v in range(nmode):
                     arr[0][0].plot(self.omega[1,:,v]*cst.ha_to_ev*1000,gru[0,:,v],color=col[v],marker = 'o',linestyle='None')
                     arr[0][0].set_xlabel('Frequency (meV)')
-                    arr[0][0].set_ylabel('Mode Gruneisen, Gamma_a')
+                    arr[0][0].set_ylabel(r'Mode Gruneisen, $\gamma^a$')
 
                     arr[0][1].plot(self.omega[1,:,v]*cst.ha_to_ev*1000,gru[1,:,v],color=col[v],marker = 'o',linestyle='None')
                     arr[0][1].set_xlabel('Frequency (meV)')
-                    arr[0][1].set_ylabel('Mode Gruneisen_gamma_c')
+                    arr[0][1].set_ylabel(r'Mode Gruneisen, $\gamma^c$')
 #                    arr[0][0].set_title(r'Slope $\omega$ vs V') 
 #                    arr[0][1].set_title(r'Dynamical matrix') 
 #                    arr[0][0].plot(self.omega[1,0,v]*cst.ha_to_ev*1000,gru[0,v],marker='d',color='black',linestyle='None')
@@ -1018,11 +1021,11 @@ class Gruneisen(FreeEnergy):
                     #with finite centreal difference
                     arr[1][0].plot(self.omega[1,:,v]*cst.ha_to_ev*1000,gru2[0,:,v],color=col[v],marker = 'o',linestyle='None')
                     arr[1][0].set_xlabel('Frequency (meV)')
-                    arr[1][0].set_ylabel('Mode Gruneisen, Gamma_a')
+                    arr[1][0].set_ylabel(r'Mode Gruneisen, $\gamma^a$')
 
                     arr[1][1].plot(self.omega[1,:,v]*cst.ha_to_ev*1000,gru2[1,:,v],color=col[v],marker = 'o',linestyle='None')
                     arr[1][1].set_xlabel('Frequency (meV)')
-                    arr[1][1].set_ylabel('Mode Gruneisen_gamma_c')
+                    arr[1][1].set_ylabel('Mode Gruneisen, $\gamma^c$')
 #                    arr[0][0].set_title(r'Slope $\omega$ vs V') 
 #                    arr[0][1].set_title(r'Dynamical matrix') 
 #                    arr[0][0].plot(self.omega[1,0,v]*cst.ha_to_ev*1000,gru[0,v],marker='d',color='black',linestyle='None')
@@ -1166,7 +1169,7 @@ class Gruneisen(FreeEnergy):
         if self.symmetry == 'hexagonal':
             
             
-            plot = False
+            plot = True
 
            
 
@@ -1285,13 +1288,13 @@ class Gruneisen(FreeEnergy):
 
 
                 # Reeber 1999 data
-                reeber_alphaA = EXPfile('/Users/veroniquebrousseau/Google_Drive/doctorat/work/TI/GaN/TE/data/GaN_alphaAT_Reeber1999.nc')
+                reeber_alphaA = EXPfile('/Users/Veronique/Google_Drive/doctorat/work/TI/GaN/TE/data/GaN_alphaAT_Reeber1999.nc')
                 reeber_alphaA.read_nc()
-                reeber_alphaC = EXPfile('/Users/veroniquebrousseau/Google_Drive/doctorat/work/TI/GaN/TE/data/GaN_alphaCT_Reeber1999.nc')
+                reeber_alphaC = EXPfile('/Users/Veronique/Google_Drive/doctorat/work/TI/GaN/TE/data/GaN_alphaCT_Reeber1999.nc')
                 reeber_alphaC.read_nc()
-                reeber_a = EXPfile('/Users/veroniquebrousseau/Google_Drive/doctorat/work/TI/GaN/TE/data/GaN_aT_Reeber1999.nc')
+                reeber_a = EXPfile('/Users/Veronique/Google_Drive/doctorat/work/TI/GaN/TE/data/GaN_aT_Reeber1999.nc')
                 reeber_a.read_nc()
-                reeber_c = EXPfile('/Users/veroniquebrousseau/Google_Drive/doctorat/work/TI/GaN/TE/data/GaN_cT_Reeber1999.nc')
+                reeber_c = EXPfile('/Users/Veronique/Google_Drive/doctorat/work/TI/GaN/TE/data/GaN_cT_Reeber1999.nc')
                 reeber_c.read_nc()
 
                 arr[0,0].plot(reeber_alphaA.xaxis, reeber_alphaA.yaxis,'xr',label='Reeber1999')
@@ -1304,31 +1307,31 @@ class Gruneisen(FreeEnergy):
                 arr[0,1].plot(self.temperature,self.fit2d[0,:]*cst.bohr_to_ang,'mo',markersize=5,label='fit2d')
                 arr[1,1].plot(self.temperature,self.fit2d[1,:]*cst.bohr_to_ang,'mo',markersize=5,label='fit2d')
 
-#                roder_a = EXPfile('/Users/Veronique/Google_Drive/doctorat/work/TI/GaN/TE/data/GaN_aT_Roder2005.nc')
-#                roder_a.read_nc()
-#                roder_a1 = EXPfile('/Users/Veronique/Google_Drive/doctorat/work/TI/GaN/TE/data/GaN_aT_Roder2005_ref1.nc')
-#                roder_a1.read_nc()
-#                roder_a4 = EXPfile('/Users/Veronique/Google_Drive/doctorat/work/TI/GaN/TE/data/GaN_aT_Roder2005_ref4.nc')
-#                roder_a4.read_nc()
-#                roder_a6 = EXPfile('/Users/Veronique/Google_Drive/doctorat/work/TI/GaN/TE/data/GaN_aT_Roder2005_ref6.nc')
-#                roder_a6.read_nc()
-#                roder_c = EXPfile('/Users/Veronique/Google_Drive/doctorat/work/TI/GaN/TE/data/GaN_cT_Roder2005.nc')
-#                roder_c.read_nc()
-#                roder_c1 = EXPfile('/Users/Veronique/Google_Drive/doctorat/work/TI/GaN/TE/data/GaN_cT_Roder2005_ref1.nc')
-#                roder_c1.read_nc()
-#                roder_c4 = EXPfile('/Users/Veronique/Google_Drive/doctorat/work/TI/GaN/TE/data/GaN_cT_Roder2005_ref4.nc')
-#                roder_c4.read_nc()
-#                roder_c6 = EXPfile('/Users/Veronique/Google_Drive/doctorat/work/TI/GaN/TE/data/GaN_cT_Roder2005_ref6.nc')
-#                roder_c6.read_nc()
-#
-#                arr[0,1].plot(roder_a.xaxis, roder_a.yaxis,'vk',label='Roder2005')
-#                arr[1,1].plot(roder_c.xaxis, roder_c.yaxis,'vk',label='Roder2005')
-#                arr[0,1].plot(roder_a1.xaxis, roder_a1.yaxis,'Pk',label='Roder2005-ref1')
-#                arr[1,1].plot(roder_c1.xaxis, roder_c1.yaxis,'Pk',label='Roder2005-ref1')
-#                arr[0,1].plot(roder_a4.xaxis, roder_a4.yaxis,'sk',label='Roder2005-ref4')
-#                arr[1,1].plot(roder_c4.xaxis, roder_c4.yaxis,'sk',label='Roder2005-ref4')
-#                arr[0,1].plot(roder_a6.xaxis, roder_a6.yaxis,'*k',label='Roder2005-ref6')
-#                arr[1,1].plot(roder_c6.xaxis, roder_c6.yaxis,'*k',label='Roder2005-ref6')
+                roder_a = EXPfile('/Users/Veronique/Google_Drive/doctorat/work/TI/GaN/TE/data/GaN_aT_Roder2005.nc')
+                roder_a.read_nc()
+                roder_a1 = EXPfile('/Users/Veronique/Google_Drive/doctorat/work/TI/GaN/TE/data/GaN_aT_Roder2005_ref1.nc')
+                roder_a1.read_nc()
+                roder_a4 = EXPfile('/Users/Veronique/Google_Drive/doctorat/work/TI/GaN/TE/data/GaN_aT_Roder2005_ref4.nc')
+                roder_a4.read_nc()
+                roder_a6 = EXPfile('/Users/Veronique/Google_Drive/doctorat/work/TI/GaN/TE/data/GaN_aT_Roder2005_ref6.nc')
+                roder_a6.read_nc()
+                roder_c = EXPfile('/Users/Veronique/Google_Drive/doctorat/work/TI/GaN/TE/data/GaN_cT_Roder2005.nc')
+                roder_c.read_nc()
+                roder_c1 = EXPfile('/Users/Veronique/Google_Drive/doctorat/work/TI/GaN/TE/data/GaN_cT_Roder2005_ref1.nc')
+                roder_c1.read_nc()
+                roder_c4 = EXPfile('/Users/Veronique/Google_Drive/doctorat/work/TI/GaN/TE/data/GaN_cT_Roder2005_ref4.nc')
+                roder_c4.read_nc()
+                roder_c6 = EXPfile('/Users/Veronique/Google_Drive/doctorat/work/TI/GaN/TE/data/GaN_cT_Roder2005_ref6.nc')
+                roder_c6.read_nc()
+
+                arr[0,1].plot(roder_a.xaxis, roder_a.yaxis,'vk',label='Roder2005')
+                arr[1,1].plot(roder_c.xaxis, roder_c.yaxis,'vk',label='Roder2005')
+                arr[0,1].plot(roder_a1.xaxis, roder_a1.yaxis,'Pk',label='Roder2005-ref1')
+                arr[1,1].plot(roder_c1.xaxis, roder_c1.yaxis,'Pk',label='Roder2005-ref1')
+                arr[0,1].plot(roder_a4.xaxis, roder_a4.yaxis,'sk',label='Roder2005-ref4')
+                arr[1,1].plot(roder_c4.xaxis, roder_c4.yaxis,'sk',label='Roder2005-ref4')
+                arr[0,1].plot(roder_a6.xaxis, roder_a6.yaxis,'*k',label='Roder2005-ref6')
+                arr[1,1].plot(roder_c6.xaxis, roder_c6.yaxis,'*k',label='Roder2005-ref6')
 
                 a_pph = np.array([6.08470767295951E+00,6.09447074714269E+00,6.12096344024277E+00,6.17026163490221E+00,6.24972442596757E+00,6.37597582992085E+00,6.61966832821061E+00])
                 c_pph = np.array([9.91152199244032E+00,9.92461271952359E+00,9.96261928816134E+00,1.00342327383386E+01,1.01504947767351E+01,1.03357790051093E+01,1.06854643693506E+01])
@@ -1384,7 +1387,7 @@ class Gruneisen(FreeEnergy):
 
 
                 plt.suptitle(r'GaN wurtzite')
-                #plt.savefig('GaN_TE.png')
+                plt.savefig('GaN_TE.png')
                 plt.show() 
             
 #            for t,T in enumerate(self.temperature):
@@ -2026,7 +2029,7 @@ def compute(
 #    calc.write_freeenergy()
         # write gibbs or helmholtz, equilibrium acells (P,T), list of temperatures, pressures, initial volumes
         # in netcdf format, will allow to load the data for plotting
-        calc.write_acell()
+#        calc.write_acell()
 
        # write equilibrium acells, in ascii file
     return
