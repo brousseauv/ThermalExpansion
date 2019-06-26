@@ -1072,6 +1072,8 @@ class Gruneisen(FreeEnergy):
 #                        plt.plot(np.log(self.volume[:,1]),np.log(self.omega[:,c,i]),marker='x')
 #                        plt.xlabel('ln V')
 #                        plt.ylabel('ln omega')
+                
+                plt.suptitle('{}'.format(self.rootname))
 
                 outfile = 'FIG/gruneisen_{}.png'.format(self.rootname)
                 create_directory(outfile)
@@ -1215,6 +1217,8 @@ class Gruneisen(FreeEnergy):
                 self.bose[i,n,:] = self.get_bose(self.omega[1,i,n],self.temperature)
                 cv[i,n,:] = self.get_specific_heat(self.omega[1,i,n],self.temperature)
 
+            boseplushalf = self.bose + np.ones((nqpt,nmode,self.ntemp))*0.5
+
 #            x = np.zeros((nqpt,nmode,self.ntemp)) # q,v,t
 
 #            for t in range(self.ntemp):
@@ -1224,6 +1228,7 @@ class Gruneisen(FreeEnergy):
             #bose = 1./(np.exp(x)-1)
             #bose[0,:3,:] = 0 # Check what Gabriel did)
             hwt = np.einsum('qv,qvt->qvt',self.omega[1,:,:],self.bose)
+            hwt_plushalf = np.einsum('qv,qvt->qvt',self.omega[1,:,:],boseplushalf)
             # fix this properly later!!! 
             #cv[0,:3,:] = 0
 
@@ -1247,14 +1252,25 @@ class Gruneisen(FreeEnergy):
             # Then, get a(T) and c(T)
             integral_a = np.einsum('q,qvt,qv->t',self.wtq,hwt,self.gruneisen[0,:,:])
             integral_c = np.einsum('q,qvt,qv->t',self.wtq,hwt,self.gruneisen[1,:,:])
+            integral_a0 = 0.5*np.einsum('q,qv,qv',self.wtq,self.omega[1,:,:],self.gruneisen[0,:,:])
+            integral_c0 = 0.5*np.einsum('q,qv,qv',self.wtq,self.omega[1,:,:],self.gruneisen[1,:,:])
+            integral_aplushalf = np.einsum('q,qvt,qv->t',self.wtq,hwt_plushalf,self.gruneisen[0,:,:])
+            integral_cplushalf = np.einsum('q,qvt,qv->t',self.wtq,hwt_plushalf,self.gruneisen[1,:,:])
 
-            a = (self.compliance[0,0]+self.compliance[0,1])*integral_a + self.compliance[0,2]*integral_c
-            a = self.equilibrium_volume[1]*(a/self.equilibrium_volume[0] + 1)
-            daa = ((self.compliance[0,0]+self.compliance[0,1])*integral_a + self.compliance[0,2]*integral_c)/self.equilibrium_volume[0]
 
-            c = 2*self.compliance[0,2]*integral_a + self.compliance[2,2]*integral_c
-            c = self.equilibrium_volume[3]*(c/self.equilibrium_volume[0] + 1)
-            dcc = (2*self.compliance[0,2]*integral_a + self.compliance[2,2]*integral_c)/self.equilibrium_volume[0]
+            aterm = (self.compliance[0,0]+self.compliance[0,1])*integral_a + self.compliance[0,2]*integral_c
+            a = self.equilibrium_volume[1]*(aterm/self.equilibrium_volume[0] + 1)
+            daa = aterm/self.equilibrium_volume[0]
+
+            aterm_plushalf = (self.compliance[0,0]+self.compliance[0,1])*integral_aplushalf + self.compliance[0,2]*integral_cplushalf
+            aplushalf = self.equilibrium_volume[1]*(aterm_plushalf/self.equilibrium_volume[0] + 1)
+
+            cterm = 2*self.compliance[0,2]*integral_a + self.compliance[2,2]*integral_c
+            c = self.equilibrium_volume[3]*(cterm/self.equilibrium_volume[0] + 1)
+            dcc = cterm/self.equilibrium_volume[0]
+            cterm_plushalf = 2*self.compliance[0,2]*integral_aplushalf + self.compliance[2,2]*integral_cplushalf
+            cplushalf = self.equilibrium_volume[3]*(cterm_plushalf/self.equilibrium_volume[0] + 1)
+
             daa_slope = np.polyfit(self.temperature[14:],daa[14:],1)
             print('Delta a/a interesect: {:>8.5e}'.format(daa_slope[1]))
             dcc_slope = np.polyfit(self.temperature[14:],dcc[14:],1)
@@ -1266,17 +1282,27 @@ class Gruneisen(FreeEnergy):
             c2 = 2*self.compliance_rigid[0,2]*integral_a + self.compliance[2,2]*integral_c
             c2 = self.equilibrium_volume[3]*(c2/self.equilibrium_volume[0] + 1)
 
+            # Test the da/a at T=0, using the 1/2 factor
+            da0 = ((self.compliance[0,0]+self.compliance[0,1])*integral_a0 + self.compliance[0,2]*integral_c0)/self.equilibrium_volume[0]
+            dc0 = (2*self.compliance[0,2]*integral_a0 + self.compliance[2,2]*integral_c0)/self.equilibrium_volume[0]
 
             acell = np.array([a,c])
+            self.acellplushalf = np.array([aplushalf,cplushalf])
+
 #            self.acell2 = np.array([a2,c2])
 
             print('From Gruneisen parameters')
+            print('da/a at T=0 = {}, da = {} bohr, a0 = {} bohr'.format(da0,da0*self.equilibrium_volume[1],da0*self.equilibrium_volume[1] + self.equilibrium_volume[1]))
+            print('dc/c at T=0 = {}, dc = {} bohr, c0 = {} bohr'.format(dc0,dc0*self.equilibrium_volume[3],dc0*self.equilibrium_volume[3]+ self.equilibrium_volume[3]))
+
             for t,T in enumerate(self.temperature):
                 print('T={}K, a={}, c={}'.format(T,a[t],c[t]))
+                print('plushalf, a={}, c={}'.format(aplushalf[t],cplushalf[t]))
+
 
             if plot:
                 import matplotlib.pyplot as plt
-                fig,arr = plt.subplots(2,2,figsize=(10,10),sharey=False)
+                fig,arr = plt.subplots(2,3,figsize=(15,10),sharey=False)
                 arr[0,0].plot(self.temperature,alpha_a*1E6,'r',label='relaxed') 
 #                arr[0,0].plot(self.temperature,alpha_a2*1E6,'g',label='rigid') 
 #                arr[0,0].plot(self.temperature,alpha_af*1E6,'c:',label='finite') 
@@ -1307,20 +1333,29 @@ class Gruneisen(FreeEnergy):
                     for a2 in range(2):
                         arr[a1,a2].set_xlim(self.temperature[0],self.temperature[-1])
 
-                #arr[0,1].plot(self.temperature, a*cst.bohr_to_ang,'r',label='relaxed')
+                arr[0,2].plot(self.temperature, a*cst.bohr_to_ang,'r',label='n')
+                arr[0,2].plot(self.temperature, aplushalf*cst.bohr_to_ang,'k:',label='n + 1/2')
 
 #                arr[0,1].plot(self.temperature, a2*cst.bohr_to_ang,'g',label='rigid')
 
 
 #                twin1 = arr[1].twinx()
                 arr[1,1].plot(self.temperature,dcc*1E3,'b',label='relaxed')
-                #arr[1,1].plot(self.temperature,c*cst.bohr_to_ang,'b',label='relaxed')
+                arr[1,2].plot(self.temperature,c*cst.bohr_to_ang,'b',label='n')
+                arr[1,2].plot(self.temperature,cplushalf*cst.bohr_to_ang,'k:',label='n + 1/2')
+
 #                arr[1,1].plot(self.temperature,c2*cst.bohr_to_ang,'g',label='rigid')
 
 
                 #arr[2].plot(self.temperature-273, a*cst.bohr_to_ang, 'or')
                 arr[0,1].set_ylabel(r'$\Delta$ a/a x 10$^3$',color='r')
                 arr[1,1].set_ylabel(r'$\Delta$ c/c x 10$^3$',color='b')
+
+                arr[0,2].set_ylabel(r'a ($\AA$)',color='r')
+                arr[1,2].set_ylabel(r' c ($\AA$)',color='b')
+                arr[0,2].legend()
+                arr[1,2].legend()
+
                 #arr[2].set_xlabel(r'T (Celcius)')
                 #arr[2].set_xlim((-100,250))
         
@@ -1693,6 +1728,12 @@ class Gruneisen(FreeEnergy):
                 f.write('{:12}      {:<12}    {:<12}\n'.format('Temperature','a (bohr)','c (bohr)'))
                 for t,T in enumerate(self.temperature):
                     f.write('{:>8.1f} K    {:>12.8f}    {:>12.8f}\n'.format(T,self.acell_via_gruneisen[0,t],self.acell_via_gruneisen[1,t]))
+
+                f.write('\n\nFrom Gruneisen with n+1/2\n\n')
+                f.write('{:12}      {:<12}    {:<12}\n'.format('Temperature','a (bohr)','c (bohr)'))
+                for t,T in enumerate(self.temperature):
+                    f.write('{:>8.1f} K    {:>12.8f}    {:>12.8f}\n'.format(T,self.acellplushalf[0,t],self.acellplushalf[1,t]))
+
 
                 f.close()
 
