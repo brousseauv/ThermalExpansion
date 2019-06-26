@@ -1250,15 +1250,15 @@ class Gruneisen(FreeEnergy):
 
             a = (self.compliance[0,0]+self.compliance[0,1])*integral_a + self.compliance[0,2]*integral_c
             a = self.equilibrium_volume[1]*(a/self.equilibrium_volume[0] + 1)
-            daa = a/self.equilibrium_volume[1]
+            daa = ((self.compliance[0,0]+self.compliance[0,1])*integral_a + self.compliance[0,2]*integral_c)/self.equilibrium_volume[0]
 
             c = 2*self.compliance[0,2]*integral_a + self.compliance[2,2]*integral_c
             c = self.equilibrium_volume[3]*(c/self.equilibrium_volume[0] + 1)
-            dcc = c/self.equilibrium_volume[3]
+            dcc = (2*self.compliance[0,2]*integral_a + self.compliance[2,2]*integral_c)/self.equilibrium_volume[0]
             daa_slope = np.polyfit(self.temperature[14:],daa[14:],1)
-            print('Delta a/a interesect: {}'.format(daa_slope[1]))
+            print('Delta a/a interesect: {:>8.5e}'.format(daa_slope[1]))
             dcc_slope = np.polyfit(self.temperature[14:],dcc[14:],1)
-            print('Delta c/c interesect: {}'.format(dcc_slope[1]))
+            print('Delta c/c interesect: {:>8.5e}'.format(dcc_slope[1]))
 
             a2 = (self.compliance_rigid[0,0]+self.compliance[0,1])*integral_a + self.compliance[0,2]*integral_c
             a2 = self.equilibrium_volume[1]*(a2/self.equilibrium_volume[0] + 1)
@@ -1298,25 +1298,29 @@ class Gruneisen(FreeEnergy):
                 arr[1,0].set_xlabel(r'Temperature (K)')
 #                arr[0].set_title(r'Expansion coefficients') 
 #                arr[1].set_title(r'Lattice parameters')
-                arr[0,1].plot(self.temperature, daa,'r',label='relaxed')
+                arr[0,1].plot(self.temperature, daa*1E3,'r',label='relaxed')
                 atest = self.temperature*daa_slope[0]+daa_slope[1]
                 ctest = self.temperature*dcc_slope[0]+dcc_slope[1]
-                arr[0,1].plot(self.temperature, atest,'k:')
-                arr[1,1].plot(self.temperature, ctest,'k:')
+                arr[0,1].plot(self.temperature, atest*1E3,'k:')
+                arr[1,1].plot(self.temperature, ctest*1E3,'k:')
+                for a1 in range(2):
+                    for a2 in range(2):
+                        arr[a1,a2].set_xlim(self.temperature[0],self.temperature[-1])
+
                 #arr[0,1].plot(self.temperature, a*cst.bohr_to_ang,'r',label='relaxed')
 
 #                arr[0,1].plot(self.temperature, a2*cst.bohr_to_ang,'g',label='rigid')
 
 
 #                twin1 = arr[1].twinx()
-                arr[1,1].plot(self.temperature,dcc,'b',label='relaxed')
+                arr[1,1].plot(self.temperature,dcc*1E3,'b',label='relaxed')
                 #arr[1,1].plot(self.temperature,c*cst.bohr_to_ang,'b',label='relaxed')
 #                arr[1,1].plot(self.temperature,c2*cst.bohr_to_ang,'g',label='rigid')
 
 
                 #arr[2].plot(self.temperature-273, a*cst.bohr_to_ang, 'or')
-                arr[0,1].set_ylabel(r'\Delta a/a (ang)',color='r')
-                arr[1,1].set_ylabel(r'\Delta c/c (ang)',color='b')
+                arr[0,1].set_ylabel(r'$\Delta$ a/a x 10$^3$',color='r')
+                arr[1,1].set_ylabel(r'$\Delta$ c/c x 10$^3$',color='b')
                 #arr[2].set_xlabel(r'T (Celcius)')
                 #arr[2].set_xlim((-100,250))
         
@@ -1435,7 +1439,7 @@ class Gruneisen(FreeEnergy):
                 outfile = 'FIG/{}_alpha.png'.format(self.rootname)
                 create_directory(outfile)
                 plt.savefig(outfile)
-#                plt.show() 
+                plt.show() 
             
 #            for t,T in enumerate(self.temperature):
 #                print('T={}K, a={} ang, c={} ang'.format(T,a[t]*cst.bohr_to_ang,c[t]*cst.bohr_to_ang))
