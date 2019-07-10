@@ -19,7 +19,7 @@ from outfile import OutFile
 from gsrfile import GsrFile
 from gapfile import GapFile
 from elasticfile import ElasticFile
-#from zpr_plotter import EXPfile
+from zpr_plotter import EXPfile
 import eos as eos
 
 from matplotlib import rc
@@ -939,7 +939,7 @@ class Gruneisen(FreeEnergy):
 #                    gru[q,v] = -1*np.polyfit(np.log(self.volume[:,1]), np.log(self.omega[:,q,v]),1)[0]
                     # This is the LINEAR gruneisen parameters
 #                    gru[q,v] = -self.equilibrium_volume[1]/self.omega[1,q,v]*np.polyfit(self.volume[:,1],self.omega[:,q,v],1)[0]
-                    gru[q,v] = -self.equilibrium_volume[1]/self.omega[1,q,v]*(self.omega[2,q,v]-self.omega[0,q,v])/(self.volume[2,1]-self.volume[2,1])
+                    gru[q,v] = -self.equilibrium_volume[1]/self.omega[1,q,v]*(self.omega[2,q,v]-self.omega[0,q,v])/(self.volume[2,1]-self.volume[0,1])
 
                     # This is the VOLUMIC one (that is, gru(linear)/3)
                     self.gruvol[q,v] = -self.equilibrium_volume[0]/self.omega[1,q,v]*np.polyfit(self.volume[:,0],self.omega[:,q,v],1)[0]
@@ -1090,7 +1090,7 @@ class Gruneisen(FreeEnergy):
         # Evaluate acell(T) from Gruneisen parameters
         if self.symmetry == 'cubic':
             
-            plot = False
+            plot = True
             # First, get alpha(T)
 
             # Get Bose-Einstein factor and specific heat Cv
@@ -1198,6 +1198,7 @@ class Gruneisen(FreeEnergy):
             for t,T in enumerate(self.temperature):
                 print('T={}K, a={} bohr, delta a = {} bohr'.format(T,a[t],a[t]-a[0]))
 
+            a = np.expand_dims(a,axis=0)
             return a
 
         if self.symmetry == 'hexagonal':
@@ -1272,9 +1273,9 @@ class Gruneisen(FreeEnergy):
             cplushalf = self.equilibrium_volume[3]*(cterm_plushalf/self.equilibrium_volume[0] + 1)
 
             daa_slope = np.polyfit(self.temperature[14:],daa[14:],1)
-            print('Delta a/a interesect: {:>8.5e}'.format(daa_slope[1]))
+            print('Delta a/a interesect: {:>8.5e},Delta a = {:>8.5f} bohr'.format(daa_slope[1],-self.equilibrium_volume[1]*daa_slope[1]))
             dcc_slope = np.polyfit(self.temperature[14:],dcc[14:],1)
-            print('Delta c/c interesect: {:>8.5e}'.format(dcc_slope[1]))
+            print('Delta c/c interesect: {:>8.5e}, Delta c = {} bohr'.format(dcc_slope[1],-self.equilibrium_volume[3]*dcc_slope[1]))
 
             a2 = (self.compliance_rigid[0,0]+self.compliance[0,1])*integral_a + self.compliance[0,2]*integral_c
             a2 = self.equilibrium_volume[1]*(a2/self.equilibrium_volume[0] + 1)
@@ -1718,7 +1719,7 @@ class Gruneisen(FreeEnergy):
 
                 f.write('{:12}    {:12}\n'.format('Temperature','a (bohr)'))
                 for t,T in enumerate(self.temperature):
-                    f.write('{:>8.1f} K    {:>12.8f}\n'.format(T,self.acell_via_gruneisen[t]))
+                    f.write('{:>8.1f} K    {:>12.8f}\n'.format(T,self.acell_via_gruneisen[0,t]))
 
                 f.close()
 
