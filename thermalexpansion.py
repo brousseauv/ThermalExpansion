@@ -10,6 +10,9 @@ import sys
 import netCDF4 as nc
 import warnings
 import itertools as itt
+
+import matplotlib
+matplotlib.use('TKAgg')
 import matplotlib.pyplot as plt
 import constants as cst
 
@@ -115,12 +118,30 @@ class FreeEnergy(object):
         else:
             self.wtq = np.array(wtq)
 
-    def ha2molc(self,f0,ft):
+    def ha2molc(self,f0,ft,v):
 
-        x = (f0*np.ones((self.ntemp)) + ft)*cst.ha_to_ev*cst.ev_to_j*cst.Na
+        x = (f0*np.ones((self.ntemp)) + ft)*cst.ha_to_ev*cst.ev_to_j*cst.avogadro
         for t,T in enumerate(self.temperature):
             #print('T = {:>3d}K : F_0+F_T = {: 13.11e} J/molc'.format(T,x[t]))
             print('T = {:>3d}K : F_0+F_T = {: 13.11e} J/molc = {: 13.11e} Ha'.format(T,x[t],f0+ft[t]))
+
+        fname = '{}_anaddb.dat'.format(self.rootname)
+
+        if v==0:
+            action = 'w'
+        else:
+            action = 'a'
+
+        with open(fname, action) as f:
+            f.write('Thermal Free energy, for comparison with anaddb output, for volume index {}\n\n'.format(v+1))
+            f.write('{:>8}  {:>15}  {:>15}\n'.format('T (K)','F_0+F_T (Ha)','F_0+F_T (J/molc)'))
+            for t, T in enumerate(self.temperature):
+                f.write('{:>8d}  {:>14.11e}  {:>14.11e}\n'.format(T,f0+ft[t],x[t]))
+
+            f.write('\n')
+
+        f.close()
+            
 
     def reduce_acell(self,acell):
         # Check which lattice parameter are independent
@@ -325,7 +346,7 @@ class HelmholtzFreeEnergy(FreeEnergy):
 
         if self.check_anaddb:
             # Convert results in J/mol-cell, to compare with anaddb output
-            self.ha2molc(F_0,F_T)
+            self.ha2molc(F_0,F_T,v)
 
         # Minimize F
         #Here, I have F[nvol,T] and also the detailed acell for each volume
@@ -583,7 +604,7 @@ class Gruneisen(FreeEnergy):
     temperature = None
     pressure = 0.0
 
-#    check_anaddb = False
+    check_anaddb = False
 
     def __init__(self,
 
@@ -598,7 +619,7 @@ class Gruneisen(FreeEnergy):
         wtq = [1.0],
         temperature = np.arange(0,300,50),
 
-#        check_anaddb = False,
+        check_anaddb = False,
 
         bulk_modulus = None,
         pressure = 0.0,
@@ -631,7 +652,7 @@ class Gruneisen(FreeEnergy):
                 raise Exception('For hexagonal system, elastic compliance tensor (computed with anaddb) must be provided as a .nc file.')
 
         super(Gruneisen,self).__init__(rootname,units)
-#        self.check_anaddb = check_anaddb
+        self.check_anaddb = check_anaddb
 
         self.temperature = temperature
         self.ntemp = len(self.temperature) 
@@ -642,7 +663,6 @@ class Gruneisen(FreeEnergy):
         if self.pressure_units == 'GPa':
             self.pressure = self.pressure*cst.gpa_to_habo3
 
-        print(self.pressure)
 
         if bulk_modulus:
             if bulk_modulus_units == 'GPa':
@@ -718,31 +738,34 @@ class Gruneisen(FreeEnergy):
                         ##### CHECK WITH GABRIEL IF I SHOULD HAVE LOTO SPLITTING AT GAMMA (WHERE DOES HIS CODE TREAT THE ELECTRIC FIELD PERTURBAITON IN THE DDB AT GAMMA???)
 
                 # Store frequencies for Gruneisen parameters
+                print(v+1,i+1)
                 self.omega[v,i,:] = ddb.omega
-                if v==1:
-                    print(i+1,ddb.omega)
 
-                    # Manual correction for 0.0gpa
-                    if i+1==26:
-                        self.omega[v,i,0] = 0.2854956226E-04
-                        self.omega[v,i,1] = 0.2854956226E-04
-                    if i+1==56:
-                        self.omega[v,i,0] = 0.3932015304E-04
-                        self.omega[v,i,1] = 0.3932015304E-04
-
-
-#                    # Manual correction for 0.5gpa
+                '''equilibrium volume'''
+#                if v==1:
+##                    print(i+1,ddb.omega)
+#
+#                    # Manual correction for 0.0gpa
 #                    if i+1==26:
-#                        self.omega[v,i,0] = 0.4283688046E-04
-#                        self.omega[v,i,1] = 0.4283688046E-04
+#                        self.omega[v,i,0] = 0.2854956226E-04
+#                        self.omega[v,i,1] = 0.2854956226E-04
 #                    if i+1==56:
-#                        self.omega[v,i,0] = 0.5818795222E-04
-#                        self.omega[v,i,1] = 0.5818795222E-04
+#                        self.omega[v,i,0] = 0.3932015304E-04
+#                        self.omega[v,i,1] = 0.3932015304E-04
+#
 
-#                    # Manual correction for 1gpa
-#                    if i+1==26:
-#                        self.omega[v,i,0] = 0.5350676926E-04
-#                        self.omega[v,i,1] = 0.5350676926E-04
+#                   # Manual correction for 0.5gpa
+#                   if i+1==26:
+#                       self.omega[v,i,0] = 0.4283688046E-04
+#                       self.omega[v,i,1] = 0.4283688046E-04
+#                   if i+1==56:
+#                       self.omega[v,i,0] = 0.5818795222E-04
+#                       self.omega[v,i,1] = 0.5818795222E-04
+
+##                   # Manual correction for 1gpa
+#                   if i+1==26:
+#                       self.omega[v,i,0] = 0.5350676926E-04
+#                       self.omega[v,i,1] = 0.5350676926E-04
                 # get F0 contribution
                 F_0 += self.wtq[i]*self.get_f0(ddb.omega) 
                 # get Ftherm contribution
@@ -754,9 +777,19 @@ class Gruneisen(FreeEnergy):
                 
             self.free_energy[v,:] = (E+F_0)*np.ones((self.ntemp)) + F_T
             self.gibbs_free_energy[v,:] = (E+F_0+self.pressure*self.volume[v,0])*np.ones((self.ntemp)) + F_T 
-#        if self.check_anaddb:
-#            # Convert results in J/mol-cell, to compare with anaddb output
-#            self.ha2molc(F_0,F_T)
+
+            if self.check_anaddb:
+                print('Thermal free energy for volume {}'.format(v))
+                # Convert results in J/mol-cell, to compare with anaddb output
+                self.ha2molc(F_0,F_T,v)
+
+        ### End of loop on volumes, all data has been read ###
+        ''' TO DO'''
+        ''' First fit of Murnaghan EOS from static calc results, to get parameters??? or use them as input???'''
+
+        ''' Fit Murnaghan EOS for Ftot(V) at each T, to get the 'real' P I must add for the Gibbs free energy'''
+
+
 
         # Minimize F
         #Here, I have F[nvol,T] and also the detailed acell for each volume
@@ -775,6 +808,7 @@ class Gruneisen(FreeEnergy):
         ### Add a check for homogenious acell increase (for central finite difference)
         self.temperature_dependent_acell = self.minimize_free_energy()
         self.equilibrium_volume = self.volume[1,:]
+#        self.minimize_free_energy_from_eos()
 
         # Read elastic compliance from file
         if self.elastic_fname:
@@ -801,6 +835,25 @@ class Gruneisen(FreeEnergy):
         
 # add a function to get the grüneisen mode parameters. This will require to store the frequencies for computation after all volumes have been read and analysed.
 # for the Gruneisen, I need the derivative od the frequencies vs volume.
+
+    def minimize_free_energy_from_eos(self):
+
+        ## Same as minimize_free_energy, but fit a Murnaghan EOS instead of a paraboloid
+
+        if self.symmetry == 'hexagonal':
+
+            # Only independent fit for now...
+            fit = np.zeros((2,self.ntemp))
+
+            for t,T in enumerate(self.temperature):
+
+                # First, treat a
+                # V0, E0, B0, B0' 
+                '''or, B0=9.8, B0'=7.6'''
+                p0 = [self.equilibrium_volume[1],self.equilibrium_volume[3], self.gibbs_free_energy[1,t], 8.7*cst.gpa_to_habo3,8.9*cst.gpa_to_habo3]
+                popt, pcov= curve_fit(eos.murnaghan_EV_axial, self.volume[:,0], self.gibbs_free_energy[:,t], p0)
+                print('for T={}K, popt= {}'.format(T,popt))
+        
 
     def minimize_free_energy(self):
 
@@ -841,8 +894,6 @@ class Gruneisen(FreeEnergy):
             fit2dg = np.zeros((2,self.ntemp))
 
 
-            plot = False
-
             if plot:
                 import matplotlib.pyplot as plt
                 from mpl_toolkits.mplot3d import Axes3D
@@ -856,7 +907,8 @@ class Gruneisen(FreeEnergy):
                 fit[1,t] = -cfit[1]/(2*cfit[0])
 
                 
-                fit2, cov2 = leastsq(self.residuals, x0=[afit[0],afit[0],cfit[0],cfit[0],self.free_energy[1,t]], args=(self.volume[:,1],self.volume[:,3], self.free_energy[:,t]))
+                fit2, cov2 = leastsq(self.residuals, x0=[afit[0],afit[0],cfit[0],cfit[0],self.free_energy[1,t]], args=(self.volume[:,1],self.volume[:,3],
+                    self.free_energy[:,t]),maxfev=4000)
                 fit2d[:,t] = fit2[0],fit2[2]
                 print('\nT={}'.format(T))
                 #print(fit2)
@@ -872,24 +924,35 @@ class Gruneisen(FreeEnergy):
                 cfitg = np.polyfit(self.volume[3:,3],self.gibbs_free_energy[3:,t],2)
                 fitg[1,t] = -cfitg[1]/(2*cfitg[0])
 
-                fit2g, cov2g = leastsq(self.residuals, x0=[afitg[0],afitg[0],cfitg[0],cfitg[0],self.gibbs_free_energy[1,t]], args=(self.volume[:,1],self.volume[:,3], self.gibbs_free_energy[:,t]))
+
+                fit2g, cov2g = leastsq(self.residuals, x0=[afitg[0],afitg[0],cfitg[0],cfitg[0],self.gibbs_free_energy[1,t]], args=(self.volume[:,1],self.volume[:,3],
+                    self.gibbs_free_energy[:,t]),maxfev=4000)
                 fit2dg[:,t] = fit2g[0],fit2g[2]
                 print('Gibbs')
                 print(fitg[:,t])
                 print(fit2dg[:,t])
+                print(self.gibbs_free_energy[:,t])
 
 
 
                 if plot:
                     fig = plt.figure()
                     arr = fig.add_subplot(111,projection='3d')
-                    arr.plot(self.volume[:,1],self.volume[:,3],self.free_energy[:,t],marker='o',color='k',linestyle='None') #at T=0
+                    arr.plot(self.volume[:3,1],self.volume[:3,3],self.gibbs_free_energy[:3,t],marker='o',color='k',linestyle='None') #at T=0
+                    arr.plot(self.volume[3:,1],self.volume[3:,3],self.gibbs_free_energy[3:,t],marker='o',color='b',linestyle='None') #at T=0
+
                     xmesh = np.linspace(0.99*self.volume[0,1],1.01*self.volume[2,1],200)
                     ymesh = np.linspace(0.99*self.volume[3,3],1.01*self.volume[5,3],200)
                     xmesh,ymesh = np.meshgrid(xmesh,ymesh)
-                    zmesh = self.paraboloid(xmesh,ymesh,p0=fit2)
+                    zmesh = self.paraboloid(xmesh,ymesh,p0=fit2g)
+                    zlim = arr.get_zlim3d()
                     arr.plot_wireframe(xmesh,ymesh,zmesh)
+                    xx = np.ones((10))
+                    arr.plot(fit2dg[0,t]*xx,fit2dg[1,t]*xx,np.linspace(0.99999*zlim[0],1.00001*zlim[1],10),color='magenta',linewidth=2,zorder=3)
 
+                    out='FIG/{}_{}K.png'.format(self.rootname,T)
+                    create_directory(out)
+                    plt.savefig(out)
                     plt.show()
                     plt.close()
 
@@ -919,7 +982,7 @@ class Gruneisen(FreeEnergy):
 
     def get_gruneisen(self, nqpt, nmode,nvol):
 
-        plot = True
+        plot = False
 
         if plot :
             import matplotlib.pyplot as plt
@@ -1005,6 +1068,9 @@ class Gruneisen(FreeEnergy):
             self.gru_vol = np.zeros((nqpt,nmode))
             gru2 = np.zeros((2,nqpt,nmode)) #withfinite difference, on the frequencies
 
+            nlarge = np.zeros((2)) #remove after testing large Gruneisens
+            large_a = []
+            large_c = []
 
 #            print('volume:',self.volume[:,1],self.volume[:,3])
             for q,v in itt.product(range(nqpt),range(nmode)):
@@ -1023,6 +1089,29 @@ class Gruneisen(FreeEnergy):
 
                     # This is the VOLUMIC one (that is, gru(linear)/3)
                     self.gru_vol[q,v] = (gru[0,q,v] + gru[1,q,v])/3.
+
+#                    # Test to evaluate the impact of the very large Gruneisens on the final sum
+#                    if np.abs(gru[0,q,v])>5:
+#                        gru[0,q,v] = 0.
+#                        nlarge[0] += 1
+#                        large_a.append([q,v]) 
+#                    if np.abs(gru[1,q,v])>5:
+#                        gru[1,q,v] = 0.
+#                        nlarge[1] += 1
+#                        large_c.append([q,v])
+#
+#
+#            print('Number of large Gruneisen parameters put to 0 : {} for gamma_a, {} for gamma_c'.format(nlarge[0],nlarge[1]))
+#            print('They are for (q,v):')
+#            print('Gamma_a')
+#            if len(large_a) != 0:
+#                for p in large_a:
+#                    print(p)
+#            print('Gamma_c')
+#            if len(large_c) != 0:
+#                for p in large_c:
+#                    print(p)
+
 
 
             self.gru2 = gru2
@@ -1203,7 +1292,7 @@ class Gruneisen(FreeEnergy):
         if self.symmetry == 'hexagonal':
             
             
-            plot = True
+            plot = False
 
            
 
@@ -1272,9 +1361,9 @@ class Gruneisen(FreeEnergy):
             cplushalf = self.equilibrium_volume[3]*(cterm_plushalf/self.equilibrium_volume[0] + 1)
 
             daa_slope = np.polyfit(self.temperature[14:],daa[14:],1)
-            print('Delta a/a interesect: {:>8.5e}'.format(daa_slope[1]))
+            print('Delta a/a intersect: {:>8.5e}, new a0 = {} bohr'.format(daa_slope[1],-daa_slope[1]*self.equilibrium_volume[1]+self.equilibrium_volume[1]))
             dcc_slope = np.polyfit(self.temperature[14:],dcc[14:],1)
-            print('Delta c/c interesect: {:>8.5e}'.format(dcc_slope[1]))
+            print('Delta c/c intersect: {:>8.5e}, new c0 = {} bohr'.format(dcc_slope[1],-dcc_slope[1]*self.equilibrium_volume[3]+self.equilibrium_volume[3]))
 
             a2 = (self.compliance_rigid[0,0]+self.compliance[0,1])*integral_a + self.compliance[0,2]*integral_c
             a2 = self.equilibrium_volume[1]*(a2/self.equilibrium_volume[0] + 1)
@@ -1325,17 +1414,17 @@ class Gruneisen(FreeEnergy):
 #                arr[0].set_title(r'Expansion coefficients') 
 #                arr[1].set_title(r'Lattice parameters')
                 arr[0,1].plot(self.temperature, daa*1E3,'r',label='relaxed')
-                atest = self.temperature*daa_slope[0]+daa_slope[1]
-                ctest = self.temperature*dcc_slope[0]+dcc_slope[1]
-                arr[0,1].plot(self.temperature, atest*1E3,'k:')
-                arr[1,1].plot(self.temperature, ctest*1E3,'k:')
+#                atest = self.temperature*daa_slope[0]+daa_slope[1]
+#                ctest = self.temperature*dcc_slope[0]+dcc_slope[1]
+#                arr[0,1].plot(self.temperature, atest*1E3,'k:')
+#                arr[1,1].plot(self.temperature, ctest*1E3,'k:')
                 for a1 in range(2):
                     for a2 in range(2):
                         arr[a1,a2].set_xlim(self.temperature[0],self.temperature[-1])
 
                 arr[0,2].plot(self.temperature, a*cst.bohr_to_ang,'r',label='n')
                 arr[0,2].plot(self.temperature, aplushalf*cst.bohr_to_ang,'k:',label='n + 1/2')
-
+                arr[0,2].plot(self.temperature, self.fitg[0,:]*cst.bohr_to_ang, 'o',color='m',label='Gibbs')
 #                arr[0,1].plot(self.temperature, a2*cst.bohr_to_ang,'g',label='rigid')
 
 
@@ -1343,6 +1432,8 @@ class Gruneisen(FreeEnergy):
                 arr[1,1].plot(self.temperature,dcc*1E3,'b',label='relaxed')
                 arr[1,2].plot(self.temperature,c*cst.bohr_to_ang,'b',label='n')
                 arr[1,2].plot(self.temperature,cplushalf*cst.bohr_to_ang,'k:',label='n + 1/2')
+                arr[1,2].plot(self.temperature, self.fitg[1,:]*cst.bohr_to_ang, 'o',color='m',label='Gibbs')
+               
 
 #                arr[1,1].plot(self.temperature,c2*cst.bohr_to_ang,'g',label='rigid')
 
@@ -1763,10 +1854,11 @@ class Gruneisen(FreeEnergy):
                 for t,T in enumerate(self.temperature):
                     f.write('{:>8.1f} K    {:>12.8f}    {:>12.8f}\n'.format(T,self.fit2d[0,t],self.fit2d[1,t]))
 
+                # Independent fit: fitg, 2D fit: fit2dg
                 f.write('\n\nTemperature dependent lattice parameters via Gibbs free energy\n\n')
                 f.write('{:12}      {:<12}    {:<12}\n'.format('Temperature','a (bohr)','c (bohr)'))
                 for t,T in enumerate(self.temperature):
-                    f.write('{:>8.1f} K    {:>12.8f}    {:>12.8f}\n'.format(T,self.fit2dg[0,t],self.fit2dg[1,t]))
+                    f.write('{:>8.1f} K    {:>12.8f}    {:>12.8f}\n'.format(T,self.fitg[0,t],self.fitg[1,t]))
 
 
 
