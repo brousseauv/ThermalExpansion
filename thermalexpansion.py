@@ -22,7 +22,7 @@ from outfile import OutFile
 from gsrfile import GsrFile
 from gapfile import GapFile
 from elasticfile import ElasticFile
-from zpr_plotter import EXPfile
+#from zpr_plotter import EXPfile
 import eos as eos
 
 from matplotlib import rc
@@ -657,6 +657,7 @@ class Gruneisen(FreeEnergy):
         self.pressure = pressure
 
         if self.pressure_units == 'GPa':
+            self.pressure_gpa = self.pressure
             self.pressure = self.pressure*cst.gpa_to_habo3
 
 
@@ -734,34 +735,169 @@ class Gruneisen(FreeEnergy):
                         ##### CHECK WITH GABRIEL IF I SHOULD HAVE LOTO SPLITTING AT GAMMA (WHERE DOES HIS CODE TREAT THE ELECTRIC FIELD PERTURBAITON IN THE DDB AT GAMMA???)
 
                 # Store frequencies for Gruneisen parameters
-                print(v+1,i+1)
+                print(v+1,i+1,ddb.omega)
                 self.omega[v,i,:] = ddb.omega
 
-                '''equilibrium volume'''
-#                if v==1:
-##                    print(i+1,ddb.omega)
-#
-#                    # Manual correction for 0.0gpa
-#                    if i+1==26:
-#                        self.omega[v,i,0] = 0.2854956226E-04
-#                        self.omega[v,i,1] = 0.2854956226E-04
-#                    if i+1==56:
-#                        self.omega[v,i,0] = 0.3932015304E-04
-#                        self.omega[v,i,1] = 0.3932015304E-04
-#
+                '''Manual corrections for ""negative"" frequencies in the DDB along Gamma-A, NOT in phonon dispersion...'''
 
-#                   # Manual correction for 0.5gpa
-#                   if i+1==26:
-#                       self.omega[v,i,0] = 0.4283688046E-04
-#                       self.omega[v,i,1] = 0.4283688046E-04
-#                   if i+1==56:
-#                       self.omega[v,i,0] = 0.5818795222E-04
-#                       self.omega[v,i,1] = 0.5818795222E-04
+                if self.pressure_gpa==0.0:
 
-##                   # Manual correction for 1gpa
-#                   if i+1==26:
-#                       self.omega[v,i,0] = 0.5350676926E-04
-#                       self.omega[v,i,1] = 0.5350676926E-04
+                    if v==0:
+                        if i+1==11:
+                            self.omega[q,v,0] = 0.1701677510E-04
+                            self.omega[q,v,1] = 0.1701677510E-04
+                        if i+1==26:
+                            self.omega[q,v,0] = 0.3081052709E-04
+                            self.omega[q,v,1] = 0.3081052709E-04
+                        if i+1==41:
+                            self.omega[q,v,0] = 0.3951433427E-04
+                            self.omega[q,v,1] = 0.3951433427E-04
+                        if i+1==56:
+                            self.omega[q,v,0] = 0.4246114942E-04
+                            self.omega[q,v,1] = 0.4246114942E-04
+
+                    if v==1:
+                        if i+1==26:
+                            self.omega[v,i,0] = 0.2854956226E-04
+                            self.omega[v,i,1] = 0.2854956226E-04
+                        if i+1==56:
+                            self.omega[v,i,0] = 0.3932015304E-04
+                            self.omega[v,i,1] = 0.3932015304E-04
+
+                    if v==2:
+                        if i+1==11:
+                            self.omega[q,v,0] = 0.1445752629E-04
+                            self.omega[q,v,1] = 0.1445752629E-04
+                        if i+1==26:
+                            self.omega[q,v,0] = 0.2615837711E-04
+                            self.omega[q,v,1] = 0.2615837711E-04
+                        if i+1==41:
+                            self.omega[q,v,0] = 0.3352045144E-04
+                            self.omega[q,v,1] = 0.3352045144E-04
+                        if i+1==56:
+                            self.omega[q,v,0] = 0.3600703695E-04
+                            self.omega[q,v,1] = 0.3600703695E-04
+
+                    if v==3:
+                        if i+1==11:
+                            self.omega[q,v,0] = 0.1844002580E-04
+                            self.omega[q,v,1] = 0.1844002580E-04
+                        if i+1==26:
+                            self.omega[q,v,0] =0.3321005229E-04 
+                            self.omega[q,v,1] = 0.3321005229E-04
+                        if i+1==41:
+                            self.omega[q,v,0] = 0.4239809330E-04
+                            self.omega[q,v,1] = 0.4239809330E-04
+                        if i+1==56:
+                            self.omega[q,v,0] = 0.4548321391E-04
+                            self.omega[q,v,1] = 0.4548321391E-04
+
+                    if v==5:
+                        if i+1==11:
+                            self.omega[q,v,0] = 0.1329674604E-04
+                            self.omega[q,v,1] = 0.1329674604E-04
+                        if i+1==26:
+                            self.omega[q,v,0] = 0.2417267515E-04
+                            self.omega[q,v,1] = 0.2417267515E-04
+                        if i+1==41:
+                            self.omega[q,v,0] = 0.3110661810E-04
+                            self.omega[q,v,1] = 0.3110661810E-04
+                        if i+1==56:
+                            self.omega[q,v,0] = 0.3346756983E-04
+                            self.omega[q,v,1] = 0.3346756983E-04
+
+                if self.pressure_gpa==0.5:
+
+                    if v==1:
+                       if i+1==26:
+                           self.omega[v,i,0] = 0.4283688046E-04
+                           self.omega[v,i,1] = 0.4283688046E-04
+                       if i+1==56:
+                           self.omega[v,i,0] = 0.5818795222E-04
+                           self.omega[v,i,1] = 0.5818795222E-04
+
+                    if v==2:
+                        if i+1==11:
+                            self.omega[q,v,0] = 0.2238287077E-04
+                            self.omega[q,v,1] = 0.2238287077E-04
+                        if i+1==26:
+                            self.omega[q,v,0] = 0.3991101016E-04
+                            self.omega[q,v,1] = 0.3991101016E-04
+                        if i+1==41:
+                            self.omega[q,v,0] = 0.5055067226E-04
+                            self.omega[q,v,1] = 0.5055067226E-04
+                        if i+1==56:
+                            self.omega[q,v,0] = 0.5407840848E-04
+                            self.omega[q,v,1] = 0.5407840848E-04
+
+                    if v==3:
+                        if i+1==11:
+                            self.omega[q,v,0] = 0.2778743747E-04
+                            self.omega[q,v,1] = 0.2778743747E-04
+                        if i+1==26:
+                            self.omega[q,v,0] = 0.4923183936E-04
+                            self.omega[q,v,1] = 0.4923183936E-04
+                        if i+1==41:
+                            self.omega[q,v,0] = 0.6209346782E-04
+                            self.omega[q,v,1] = 0.6209346782E-04
+                        if i+1==56:
+                            self.omega[q,v,0] = 0.6634359246E-04
+                            self.omega[q,v,1] = 0.6634359246E-04
+
+                    if v==5:
+                        if i+1==11:
+                            self.omega[q,v,0] = 0.2088010115E-04
+                            self.omega[q,v,1] = 0.2088010115E-04
+                        if i+1==26:
+                            self.omega[q,v,0] = 0.3749295751E-04
+                            self.omega[q,v,1] = 0.3749295751E-04
+                        if i+1==41:
+                            self.omega[q,v,0] = 0.4775718968E-04
+                            self.omega[q,v,1] = 0.4775718968E-04
+                        if i+1==56:
+                            self.omega[q,v,0] = 0.5119297864E-04
+                            self.omega[q,v,1] = 0.5119297864E-04
+
+                if self.pressure_gpa==1.0:
+
+                    if v==1:
+                        if i+1==26:
+                            self.omega[v,i,0] = 0.5350676926E-04
+                            self.omega[v,i,1] = 0.5350676926E-04
+
+                    if v==2:
+                        if i+1==11:
+                            self.omega[q,v,0] = 0.2815987569E-04
+                            self.omega[q,v,1] = 0.2815987569E-04
+                        if i+1==26:
+                            self.omega[q,v,0] = 0.4973369845E-04
+                            self.omega[q,v,1] = 0.4973369845E-04
+
+                    if v==3:
+                        if i+1==11:
+                            self.omega[q,v,0] = 0.3428041003E-04
+                            self.omega[q,v,1] = 0.3428041003E-04
+                        if i+1==26:
+                            self.omega[q,v,0] = 0.6015751069E-04
+                            self.omega[q,v,1] = 0.6015751069E-04
+
+                    if v==5:
+                        if i+1==11:
+                            self.omega[q,v,0] = 0.2648013493E-04
+                            self.omega[q,v,1] = 0.2648013493E-04
+                        if i+1==26:
+                            self.omega[q,v,0] = 0.4713674353E-04
+                            self.omega[q,v,1] = 0.4713674353E-04
+                        if i+1==41:
+                            self.omega[q,v,0] = 0.5965927239E-04
+                            self.omega[q,v,1] = 0.5965927239E-04
+
+                if self.pressure_gpa==1.5:
+
+                if self.pressure_gpa==3.5:
+
+                if self.pressure_gpa==5.0:
+
                 # get F0 contribution
                 F_0 += self.wtq[i]*self.get_f0(ddb.omega) 
                 # get Ftherm contribution
@@ -889,7 +1025,14 @@ class Gruneisen(FreeEnergy):
                 import matplotlib.pyplot as plt
                 from mpl_toolkits.mplot3d import Axes3D
 
-
+            # This delta is the difference between real HGH minimum and PAW minimum, at the current pressure
+            #delta =  [0.011000356489930141,0.0844492602578999] #for 0gpa
+            #delta = [0.004513105799999195,0.0239153519999995] #for 0.5gpa
+            #delta = [0.0,0.0] #for 1gpa
+            #delta = [0.0031372478999998066,0.001351464000000746] #for 1.5gpa
+            #delta = [0.0,0.0] #for 3gpa
+            delta = [0.001538456200000482,-0.0026159529999993936] #for 3.5gpa
+            #delta = [0.016926552700000208,-0.0055531139999995816] #for 5gpa
             print('From free energy minimization')
             for t, T in enumerate(self.temperature):
                 afit = np.polyfit(self.volume[:3,1],self.free_energy[:3,t],2)
@@ -920,9 +1063,10 @@ class Gruneisen(FreeEnergy):
                     self.gibbs_free_energy[:,t]),maxfev=4000)
                 fit2dg[:,t] = fit2g[0],fit2g[2]
 #                print('Gibbs')
-                print(fitg[:,t])
-                print(fit2dg[:,t])
+                print(fitg[:,t]-delta)
+                print(fit2dg[:,t]-delta)
 #                print(self.gibbs_free_energy[:,t])
+                
 
 
 
@@ -1351,10 +1495,10 @@ class Gruneisen(FreeEnergy):
             cterm_plushalf = 2*self.compliance[0,2]*integral_aplushalf + self.compliance[2,2]*integral_cplushalf
             cplushalf = self.equilibrium_volume[3]*(cterm_plushalf/self.equilibrium_volume[0] + 1)
 
-            daa_slope = np.polyfit(self.temperature[14:],daa[14:],1)
-            print('Delta a/a intersect: {:>8.5e}, new a0 = {} bohr'.format(daa_slope[1],-daa_slope[1]*self.equilibrium_volume[1]+self.equilibrium_volume[1]))
-            dcc_slope = np.polyfit(self.temperature[14:],dcc[14:],1)
-            print('Delta c/c intersect: {:>8.5e}, new c0 = {} bohr'.format(dcc_slope[1],-dcc_slope[1]*self.equilibrium_volume[3]+self.equilibrium_volume[3]))
+            #daa_slope = np.polyfit(self.temperature[14:],daa[14:],1)
+            #print('Delta a/a intersect: {:>8.5e}, new a0 = {} bohr'.format(daa_slope[1],-daa_slope[1]*self.equilibrium_volume[1]+self.equilibrium_volume[1]))
+            #dcc_slope = np.polyfit(self.temperature[14:],dcc[14:],1)
+            #print('Delta c/c intersect: {:>8.5e}, new c0 = {} bohr'.format(dcc_slope[1],-dcc_slope[1]*self.equilibrium_volume[3]+self.equilibrium_volume[3]))
 
             a2 = (self.compliance_rigid[0,0]+self.compliance[0,1])*integral_a + self.compliance[0,2]*integral_c
             a2 = self.equilibrium_volume[1]*(a2/self.equilibrium_volume[0] + 1)
