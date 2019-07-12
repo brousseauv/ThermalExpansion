@@ -301,7 +301,6 @@ class HelmholtzFreeEnergy(FreeEnergy):
         # what would be the right atol (absolute tolerance) for 2 equivalent lattice parameters? 1E-4, is it too loose?
             if v==0: # REDONDANT SI JE SPECIFIE EXPLICITEMENT LE TYPE DE SYMETRIE... IL VA FALLOIR FAIRE LES 7 GROUPES ?? 
                 self.distinct_acell = self.reduce_acell(self.volume[v,1:])
-                print(self.distinc_acell)
                 nmode = 3*gs.natom
                 self.natom = gs.natom
                 self.omega = np.zeros((nvol,nqpt,nmode))
@@ -379,8 +378,6 @@ class HelmholtzFreeEnergy(FreeEnergy):
             
             fit = np.zeros((self.ntemp))
 
-            #print(self.free_energy)
-            #print(self.volume)
             for t, T in enumerate(self.temperature):
                 afit = np.polyfit(self.volume[:,1],self.free_energy[:,t],2)
                 fit[t] = -afit[1]/(2*afit[0])
@@ -388,7 +385,6 @@ class HelmholtzFreeEnergy(FreeEnergy):
                 if plot:
                     xfit = np.linspace(9.50,12.0,100)
                     yfit = afit[0]*xfit**2 + afit[1]*xfit + afit[2]
-                    #print(self.volume)
                     plt.plot(self.volume[:,1],self.free_energy[:,t],marker='o')
                     plt.plot(xfit,yfit)
 
@@ -815,9 +811,7 @@ class Gruneisen(FreeEnergy):
             elastic = ElasticFile(self.elastic_fname)
             self.compliance = elastic.compliance_relaxed
             self.compliance_rigid = elastic.compliance_clamped
-    #            print(self.compliance[0,0],self.compliance[0,1],self.compliance[0,2],self.compliance[2,2])
 
-#            print(elastic.stiffness_relaxed)
             bmod = self.get_bulkmodulus_from_elastic(elastic.stiffness_relaxed)
             bmod2 = self.get_bulkmodulus_from_elastic(elastic.stiffness_clamped)
             print('Bulk modulus from elastic constants = {:>7.3f} GPa'.format(bmod))
@@ -852,7 +846,7 @@ class Gruneisen(FreeEnergy):
                 '''or, B0=9.8, B0'=7.6'''
                 p0 = [self.equilibrium_volume[1],self.equilibrium_volume[3], self.gibbs_free_energy[1,t], 8.7*cst.gpa_to_habo3,8.9*cst.gpa_to_habo3]
                 popt, pcov= curve_fit(eos.murnaghan_EV_axial, self.volume[:,0], self.gibbs_free_energy[:,t], p0)
-                print('for T={}K, popt= {}'.format(T,popt))
+#                print('for T={}K, popt= {}'.format(T,popt))
         
 
     def minimize_free_energy(self):
@@ -866,8 +860,6 @@ class Gruneisen(FreeEnergy):
             
             fit = np.zeros((self.ntemp))
 
-            #print(self.free_energy)
-            #print(self.volume)
             for t, T in enumerate(self.temperature):
                 afit = np.polyfit(self.volume[:,1],self.free_energy[:,t],2)
                 fit[t] = -afit[1]/(2*afit[0])
@@ -875,7 +867,6 @@ class Gruneisen(FreeEnergy):
                 if plot:
                     xfit = np.linspace(9.50,12.0,100)
                     yfit = afit[0]*xfit**2 + afit[1]*xfit + afit[2]
-                    #print(self.volume)
                     plt.plot(self.volume[:,1],self.free_energy[:,t],marker='o')
                     plt.plot(xfit,yfit)
 
@@ -913,10 +904,10 @@ class Gruneisen(FreeEnergy):
                 print('\nT={}'.format(T))
                 #print(fit2)
                 #print(cov2)
-                print('independent fit')
-                print(fit[:,t])
-                print('2d fit')
-                print(fit2d[:,t])
+#                print('independent fit')
+#                print(fit[:,t])
+#                print('2d fit')
+#                print(fit2d[:,t])
 
                 # Fit Gibbs free energy
                 afitg = np.polyfit(self.volume[:3,1],self.gibbs_free_energy[:3,t],2)
@@ -928,10 +919,10 @@ class Gruneisen(FreeEnergy):
                 fit2g, cov2g = leastsq(self.residuals, x0=[afitg[0],afitg[0],cfitg[0],cfitg[0],self.gibbs_free_energy[1,t]], args=(self.volume[:,1],self.volume[:,3],
                     self.gibbs_free_energy[:,t]),maxfev=4000)
                 fit2dg[:,t] = fit2g[0],fit2g[2]
-                print('Gibbs')
+#                print('Gibbs')
                 print(fitg[:,t])
                 print(fit2dg[:,t])
-                print(self.gibbs_free_energy[:,t])
+#                print(self.gibbs_free_energy[:,t])
 
 
 
@@ -1072,7 +1063,6 @@ class Gruneisen(FreeEnergy):
             large_a = []
             large_c = []
 
-#            print('volume:',self.volume[:,1],self.volume[:,3])
             for q,v in itt.product(range(nqpt),range(nmode)):
 
                 if q==0 and v<3:
