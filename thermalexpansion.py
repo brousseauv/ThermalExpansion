@@ -958,6 +958,9 @@ class Gruneisen(FreeEnergy):
                                 self.omega[v,i,0] = 0.7600999877E-04
                                 self.omega[v,i,1] = 0.7600999877E-04
  
+                    if self.pressure_gpa==3.0:
+                        print('Nothing to correct for 3gpa')
+
                     if self.pressure_gpa==3.5:
                         print('correcting 3p5gpa')
    
@@ -1122,14 +1125,22 @@ class Gruneisen(FreeEnergy):
                 from mpl_toolkits.mplot3d import Axes3D
 
             # This delta is the difference between real HGH minimum and PAW minimum, at the current pressure
-            #delta =  [0.011000356489930141,0.0844492602578999] #for 0gpa
-            delta = [0.004513105799999195,0.0239153519999995] #for 0.5gpa
-            #delta = [0.0,0.0] #for 1gpa
-            #delta = [0.0031372478999998066,0.001351464000000746] #for 1.5gpa
-            #delta = [0.0,0.0] #for 3gpa
-           # delta = [0.001538456200000482,-0.0026159529999993936] #for 3.5gpa
-            #delta = [0.016926552700000208,-0.0055531139999995816] #for 5gpa
-            print('From free energy minimization')
+            if self.pressure_gpa==0.0:
+                delta =  [0.011000356489930141,0.0844492602578999] #for 0gpa
+            if self.pressure_gpa == 0.5:
+                delta = [0.004513105799999195,0.0239153519999995] #for 0.5gpa
+            if self.pressure_gpa == 1.0:
+                delta = [0.0,0.0] #for 1gpa
+            if self.pressure_gpa == 1.5:
+                delta = [0.0031372478999998066,0.001351464000000746] #for 1.5gpa
+            if self.pressure_gpa == 3.0:
+                delta = [0.0,0.0] #for 3gpa
+            if self.pressure_gpa == 3.5:
+                delta = [0.001538456200000482,-0.0026159529999993936] #for 3.5gpa
+            if self.pressure_gpa == 5.0:
+                delta = [0.016926552700000208,-0.0055531139999995816] #for 5gpa
+
+#            print('From free energy minimization')
             for t, T in enumerate(self.temperature):
                 afit = np.polyfit(self.volume[:3,1],self.free_energy[:3,t],2)
                 fit[0,t] = -afit[1]/(2*afit[0])
@@ -1140,7 +1151,7 @@ class Gruneisen(FreeEnergy):
                 fit2, cov2 = leastsq(self.residuals, x0=[afit[0],afit[0],cfit[0],cfit[0],self.free_energy[1,t]], args=(self.volume[:,1],self.volume[:,3],
                     self.free_energy[:,t]),maxfev=4000)
                 fit2d[:,t] = fit2[0],fit2[2]
-                print('\nT={}'.format(T))
+ #               print('\nT={}'.format(T))
                 #print(fit2)
                 #print(cov2)
 #                print('independent fit')
@@ -1601,10 +1612,10 @@ class Gruneisen(FreeEnergy):
             cterm_plushalf = 2*self.compliance[0,2]*integral_aplushalf + self.compliance[2,2]*integral_cplushalf
             cplushalf = self.equilibrium_volume[3]*(cterm_plushalf/self.equilibrium_volume[0] + 1)
 
-            #daa_slope = np.polyfit(self.temperature[14:],daa[14:],1)
-            #print('Delta a/a intersect: {:>8.5e}, new a0 = {} bohr'.format(daa_slope[1],-daa_slope[1]*self.equilibrium_volume[1]+self.equilibrium_volume[1]))
-            #dcc_slope = np.polyfit(self.temperature[14:],dcc[14:],1)
-            #print('Delta c/c intersect: {:>8.5e}, new c0 = {} bohr'.format(dcc_slope[1],-dcc_slope[1]*self.equilibrium_volume[3]+self.equilibrium_volume[3]))
+            daa_slope = np.polyfit(self.temperature[14:],daa[14:],1)
+            print('Delta a/a intersect: {:>8.5e}, new a0 = {} bohr'.format(daa_slope[1],-daa_slope[1]*self.equilibrium_volume[1]+self.equilibrium_volume[1]))
+            dcc_slope = np.polyfit(self.temperature[14:],dcc[14:],1)
+            print('Delta c/c intersect: {:>8.5e}, new c0 = {} bohr'.format(dcc_slope[1],-dcc_slope[1]*self.equilibrium_volume[3]+self.equilibrium_volume[3]))
 
             a2 = (self.compliance_rigid[0,0]+self.compliance[0,1])*integral_a + self.compliance[0,2]*integral_c
             a2 = self.equilibrium_volume[1]*(a2/self.equilibrium_volume[0] + 1)
