@@ -374,6 +374,7 @@ class HelmholtzFreeEnergy(FreeEnergy):
             if plot:
                 plt.show()
 
+            fit = np.expand_dims(fit,axis=0)
             return fit
 
 #    def get_gruneisen(self, nqpt, nmode,nvol):
@@ -719,16 +720,16 @@ class Gruneisen(FreeEnergy):
 
                 # Store frequencies for Gruneisen parameters
                 self.omega[v,i,:] = ddb.omega
-                if v==1:
-                    print(i+1,ddb.omega)
-
-                    # Manual correction for 0.0gpa
-                    if i+1==26:
-                        self.omega[v,i,0] = 0.2854956226E-04
-                        self.omega[v,i,1] = 0.2854956226E-04
-                    if i+1==56:
-                        self.omega[v,i,0] = 0.3932015304E-04
-                        self.omega[v,i,1] = 0.3932015304E-04
+#                if v==1:
+#                    print(i+1,ddb.omega)
+#
+#                    # Manual correction for 0.0gpa
+#                    if i+1==26:
+#                        self.omega[v,i,0] = 0.2854956226E-04
+#                        self.omega[v,i,1] = 0.2854956226E-04
+#                    if i+1==56:
+#                        self.omega[v,i,0] = 0.3932015304E-04
+#                        self.omega[v,i,1] = 0.3932015304E-04
 
 
 #                    # Manual correction for 0.5gpa
@@ -773,8 +774,9 @@ class Gruneisen(FreeEnergy):
         # Minimize F, according to crystal symmetry
 
         ### Add a check for homogenious acell increase (for central finite difference)
-        self.temperature_dependent_acell = self.minimize_free_energy()
         self.equilibrium_volume = self.volume[1,:]
+        self.temperature_dependent_acell = self.minimize_free_energy()
+        print(np.shape(self.temperature_dependent_acell))
 
         # Read elastic compliance from file
         if self.elastic_fname:
@@ -829,6 +831,10 @@ class Gruneisen(FreeEnergy):
             if plot:
                 plt.show()
 
+            #### ONLY FOR GaAs !!!!! Rescale expansion to experimental parameter
+            fit = fit - np.ones(len(fit))*0.18573269
+
+            fit = np.expand_dims(fit,axis=0)
             return fit
 
         if self.symmetry == 'hexagonal':
@@ -1101,6 +1107,7 @@ class Gruneisen(FreeEnergy):
                 self.bose[i,n,:] = self.get_bose(self.omega[1,i,n],self.temperature)
                 cv[i,n,:] = self.get_specific_heat(self.omega[1,i,n],self.temperature)
 
+            boseplushalf = self.bose + np.ones((nqpt,nmode,self.ntemp))*0.5
 #            x = np.zeros((nqpt,nmode,self.ntemp)) # q,v,t
 
 #            for t in range(self.ntemp):
@@ -1110,6 +1117,7 @@ class Gruneisen(FreeEnergy):
             #bose = 1./(np.exp(x)-1)
             #bose[0,:3,:] = 0 # Check what Gabriel did)
             hwt = np.einsum('qv,qvt->qvt',self.omega[1,:,:],self.bose)
+            hwt_plushalf = np.einsum('qv,qvt->qvt',self.omega[1,:,:],boseplushalf)
             # fix this properly later!!! 
             #cv[0,:3,:] = 0
 
@@ -1121,6 +1129,10 @@ class Gruneisen(FreeEnergy):
             # Then, get a(T)
             integral = 1./(9*self.bulk_modulus*self.volume[1,0])*np.einsum('q,qvt,qv->t',self.wtq,hwt,self.gruneisen)
             a = self.equilibrium_volume[1]*(integral+1)
+
+            integral_plushalf = 1./(9*self.bulk_modulus*self.volume[1,0])*np.einsum('q,qvt,qv->t',self.wtq,hwt_plushalf,self.gruneisen)
+            a_plushalf = self.equilibrium_volume[1]*(integral_plushalf+1)
+
 
             integralvol = 1./(self.bulk_modulus*self.volume[1,0])*np.einsum('q,qvt,qv->t',self.wtq,hwt,self.gruvol)
             vol = self.equilibrium_volume[0]*(integralvol+1)
@@ -1159,7 +1171,7 @@ class Gruneisen(FreeEnergy):
                 arr[1].plot(xexp,yexp,'k',marker='x',label = 'exp')
 
                 #Method 1 : F minimisation
-                arr[1].plot(self.temperature, self.temperature_dependent_acell*cst.bohr_to_ang,'g',marker='o',label='min F(V,T)')               
+                arr[1].plot(self.temperature, self.temperature_dependent_acell[0,:]*cst.bohr_to_ang,'g',marker='o',label='min F(V,T)')               
 
                 #Method 2 : acell and Gruneisen : via alpha(T) and beta(T)
                 arr[1].plot(self.temperature, a*cst.bohr_to_ang, 'r',marker='o',label='alpha(T)-Gruneisen')
@@ -1199,6 +1211,7 @@ class Gruneisen(FreeEnergy):
                 print('T={}K, a={} bohr, delta a = {} bohr'.format(T,a[t],a[t]-a[0]))
 
             a = np.expand_dims(a,axis=0)
+            self.acell_plushalf = np.expand_dims(a_plushalf,axis=0)
             return a
 
         if self.symmetry == 'hexagonal':
@@ -1288,7 +1301,7 @@ class Gruneisen(FreeEnergy):
             dc0 = (2*self.compliance[0,2]*integral_a0 + self.compliance[2,2]*integral_c0)/self.equilibrium_volume[0]
 
             acell = np.array([a,c])
-            self.acellplushalf = np.array([aplushalf,cplushalf])
+            self.acell_plushalf = np.array([aplushalf,cplushalf])
 
 #            self.acell2 = np.array([a2,c2])
 
@@ -1707,6 +1720,15 @@ class Gruneisen(FreeEnergy):
             data[:,:] = self.acell_via_gruneisen[:,:]
             data.units = 'Bohr radius'
 
+            data = dts.createVariable('acell_from_gruneisen_plushalf','d', ('number_of_lattice_parameters','number_of_temperatures'))
+            data[:,:] = self.acell_plushalf[:,:]
+            data.units = 'Bohr radius'
+
+
+            data = dts.createVariable('acell_from_helmholtz','d',('number_of_lattice_parameters','number_of_temperatures'))
+            data[:,:] = self.temperature_dependent_acell[:,:]
+            data.units = 'Bohr radius'
+
 
         # Then, write them in ascii file
         create_directory(outfile)
@@ -1749,11 +1771,10 @@ class Gruneisen(FreeEnergy):
 
             if self.symmetry == 'cubic':
 
-                print('not ready yet')
 
-#                f.write('{:12}    {:12}\n'.format('Temperature','a (bohr)'))
-#                for t,T in enumerate(self.temperature):
-#                    f.write('{:>8.1f} K    {:>12.8f}\n'.format(T,self.acell_via_gruneisen[t]))
+                f.write('{:12}    {:12}\n'.format('Temperature','a (bohr)'))
+                for t,T in enumerate(self.temperature):
+                    f.write('{:>8.1f} K    {:>12.8f}\n'.format(T,self.temperature_dependent_acell[0,t]))
 
                 f.close()
 
