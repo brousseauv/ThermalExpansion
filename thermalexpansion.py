@@ -990,7 +990,6 @@ class Gruneisen(FreeEnergy):
                                 self.omega[v,i,1] = 0.4742930451E-04
                      
 
->>>>>>> 4df947079054e40ba60338a58bffdca23e28662e
                 # get F0 contribution
                 F_0 += self.wtq[i]*self.get_f0(ddb.omega) 
                 # get Ftherm contribution
