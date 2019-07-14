@@ -746,7 +746,6 @@ class Gruneisen(FreeEnergy):
                 # Store frequencies for Gruneisen parameters
 #                print(v+1,i+1,ddb.omega)
                 self.omega[v,i,:] = ddb.omega
-<<<<<<< HEAD
 #                if v==1:
 #                    print(i+1,ddb.omega)
 #
@@ -771,7 +770,6 @@ class Gruneisen(FreeEnergy):
 #                    if i+1==26:
 #                        self.omega[v,i,0] = 0.5350676926E-04
 #                        self.omega[v,i,1] = 0.5350676926E-04
-=======
 
                 '''Manual corrections for ""negative"" frequencies in the DDB along Gamma-A, NOT in phonon dispersion...'''
                 if v==1:
