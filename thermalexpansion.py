@@ -1984,6 +1984,10 @@ class Gruneisen(FreeEnergy):
             data[:,:] = self.temperature_dependent_acell[:,:]
             data.units = 'Bohr radius'
 
+            data = dts.createVariable('acell_from_gibbs','d',('number_of_lattice_parameters','number_of_temperatures'))
+            data[:,:] = self.fitg[:,:]
+            data.units = 'Bohr radius'
+
 
         # Then, write them in ascii file
         create_directory(outfile)
