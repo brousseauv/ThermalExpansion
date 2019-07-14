@@ -1031,12 +1031,8 @@ class Gruneisen(FreeEnergy):
 
         ### Add a check for homogenious acell increase (for central finite difference)
         self.equilibrium_volume = self.volume[1,:]
-<<<<<<< HEAD
         self.temperature_dependent_acell = self.minimize_free_energy()
-        print(np.shape(self.temperature_dependent_acell))
-=======
 #        self.minimize_free_energy_from_eos()
->>>>>>> 4df947079054e40ba60338a58bffdca23e28662e
 
         # Read elastic compliance from file
         if self.elastic_fname:
@@ -2084,7 +2080,7 @@ class Gruneisen(FreeEnergy):
                 f.write('\n\nFrom Gruneisen with n+1/2\n\n')
                 f.write('{:12}      {:<12}    {:<12}\n'.format('Temperature','a (bohr)','c (bohr)'))
                 for t,T in enumerate(self.temperature):
-                    f.write('{:>8.1f} K    {:>12.8f}    {:>12.8f}\n'.format(T,self.acellplushalf[0,t],self.acellplushalf[1,t]))
+                    f.write('{:>8.1f} K    {:>12.8f}    {:>12.8f}\n'.format(T,self.acell_plushalf[0,t],self.acell_plushalf[1,t]))
 
 
                 f.close()
