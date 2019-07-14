@@ -2040,6 +2040,9 @@ class Gruneisen(FreeEnergy):
             dts.createDimension('number_of_temperatures', self.ntemp)
             dts.createDimension('number_of_lattice_parameters', len(self.distinct_acell))
 
+            data = dts.createVariable('temperature','d', ('number_of_temperatures'))
+            data[:] = self.temperature[:]
+            data.units = 'Kelvin'
 
             data = dts.createVariable('acell_from_gruneisen','d', ('number_of_lattice_parameters','number_of_temperatures'))
             data[:,:] = self.acell_via_gruneisen[:,:]
