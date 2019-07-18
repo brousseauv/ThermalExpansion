@@ -22,7 +22,11 @@ class OutFile(EpcFile):
 
         with nc.Dataset(fname, 'r') as root:
 
-            self.etotal = root.variables['etotal'][:]
+            status = root.get_variables_by_attributes(name='etotal')
+            if status == []:
+                self.etotal = root.variables['etotal2'][:]
+            else:
+                self.etotal = root.variables['etotal'][:]
             self.acell = root.variables['acell'][:]
             self.natom = int(root.variables['natom'][:])
     

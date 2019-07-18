@@ -101,6 +101,9 @@ class FreeEnergy(object):
             if T<tol20 :
                 continue
 
+            if omega<tol6:
+                continue
+
             x = omega/(cst.kb_haK*T)
             # prevent divergence of the log 
             if x < tolx:
@@ -165,6 +168,9 @@ class FreeEnergy(object):
             if T<tol6:
                 continue
 
+            if omega<tol6:
+                continue
+
             x = omega/(cst.kb_haK*T)
 
             if x<tolx:
@@ -182,6 +188,9 @@ class FreeEnergy(object):
         for t,T in enumerate(temp):
 
             if T<tol6:
+                continue
+
+            if omega<tol6:
                 continue
 
             x = omega/(cst.kb_haK*T)
@@ -797,10 +806,20 @@ class Gruneisen(FreeEnergy):
                             self.omega[v,i,0] = 0.5350676926E-04
                             self.omega[v,i,1] = 0.5350676926E-04
 
+                if self.pressure_gpa==5.0:
+                    '''Correcting an inversion of 2 phonon branches'''
+                    if i+1==11:
+                        if v!=2 and v!=5: #the 'plus' volumes are not inverted yet
+                            print('Inverting modes 6,7-8 for qpt 11')
+                            tmp = self.omega[v,i,7] #mode index 6 is now at position 8
+                            self.omega[v,i,7] = self.omega[v,i,6]
+                            self.omega[v,i,6] = self.omega[v,i,5]
+                            self.omega[v,i,5] = tmp
+
+
                 if self.manual_correction==True:
 
                     if self.pressure_gpa==0.0:
-                        print('correcting 0gpa')
 
                         if v==0:
                             if i+1==11:
@@ -860,7 +879,6 @@ class Gruneisen(FreeEnergy):
                                 self.omega[v,i,1] = 0.3346756983E-04
     
                     if self.pressure_gpa==0.5:
-                        print('correcting 0p5gpa')
 
                         if v==2:
                             if i+1==11:
@@ -905,7 +923,6 @@ class Gruneisen(FreeEnergy):
                                 self.omega[v,i,1] = 0.5119297864E-04
     
                     if self.pressure_gpa==1.0:
-                        print('correcting 1gpa')
 
     
                         if v==2:
@@ -936,7 +953,6 @@ class Gruneisen(FreeEnergy):
                                 self.omega[v,i,1] = 0.5965927239E-04
     
                     if self.pressure_gpa==1.5:
-                        print('correcting 1.5gpa')
 
                         if v==2:
                             if i+1==2:
@@ -962,7 +978,6 @@ class Gruneisen(FreeEnergy):
                         print('Nothing to correct for 3gpa')
 
                     if self.pressure_gpa==3.5:
-                        print('correcting 3p5gpa')
    
                         if v==0:
                             if i+1==11:
@@ -982,7 +997,6 @@ class Gruneisen(FreeEnergy):
                                 self.omega[v,i,1] = 0.4189340357E-04
     
                     if self.pressure_gpa==5.0:
-                        print('correcting 5gpa')
                         if v==0:
                             if i+1==11:
                                 self.omega[v,i,0] = 0.5452165665E-04
@@ -1316,6 +1330,11 @@ class Gruneisen(FreeEnergy):
             nlarge = np.zeros((2)) #remove after testing large Gruneisens
             large_a = []
             large_c = []
+            nlarge_5 = np.zeros((2))
+            sign_a = [0,0]
+            sign_a5 = [0,0]
+            sign_c = [0,0]
+            sign_c5 = [0,0]
 
             for q,v in itt.product(range(nqpt),range(nmode)):
 
@@ -1334,18 +1353,50 @@ class Gruneisen(FreeEnergy):
                     # This is the VOLUMIC one (that is, gru(linear)/3)
                     self.gru_vol[q,v] = (gru[0,q,v] + gru[1,q,v])/3.
 
-#                    # Test to evaluate the impact of the very large Gruneisens on the final sum
-#                    if np.abs(gru[0,q,v])>5:
-#                        gru[0,q,v] = 0.
-#                        nlarge[0] += 1
-#                        large_a.append([q,v]) 
-#                    if np.abs(gru[1,q,v])>5:
-#                        gru[1,q,v] = 0.
-#                        nlarge[1] += 1
-#                        large_c.append([q,v])
-#
-#
-#            print('Number of large Gruneisen parameters put to 0 : {} for gamma_a, {} for gamma_c'.format(nlarge[0],nlarge[1]))
+                    # Test to evaluate the impact of the very large Gruneisens on the final sum
+                    if np.abs(gru[0,q,v])>5:
+                        nlarge_5[0] +=1
+                        #gru[0,q,v] = 0.
+                        if np.sign(gru[0,q,v])>0:
+                            sign_a5[0] +=1
+                        else:
+                            sign_a5[1] +=1
+
+                        if np.abs(gru[0,q,v])>10:
+                            if np.sign(gru[0,q,v])>0:
+                                sign_a[0] +=1
+                            else:
+                                sign_a[1] +=1
+                            #gru[0,q,v] = 0.
+                            nlarge[0] += 1
+                            large_a.append([q,v]) 
+
+                    if np.abs(gru[1,q,v])>5:
+                        nlarge_5[1] +=1
+                        #gru[1,q,v] = 0.
+                        if np.sign(gru[1,q,v])>0:
+                            sign_c5[0]+=1
+                        else:
+                            sign_c5[1]+=1
+
+                        if np.abs(gru[1,q,v])>10:
+                            if np.sign(gru[1,q,v])>0:
+                                sign_c[0]+=1
+                            else:
+                                sign_c[1]+=1
+
+                            #gru[1,q,v] = 0.
+                            nlarge[1] += 1
+                            large_c.append([q,v])
+
+
+            print('For |gru|>5:')
+            print('Number of large Gruneisen parameters put to 0 : {} for gamma_a, {} for gamma_c'.format(nlarge_5[0],nlarge_5[1]))
+            print('Gamma a : {}+, {}-, Gamma c : {}+, {}-'.format(sign_a5[0],sign_a5[1],sign_c5[0],sign_c5[1]))
+            print('For |gru|>10:')
+            print('Number of large Gruneisen parameters put to 0 : {} for gamma_a, {} for gamma_c'.format(nlarge[0],nlarge[1]))
+            print('Gamma a : {}+, {}-, Gamma c : {}+, {}-'.format(sign_a[0],sign_a[1],sign_c[0],sign_c[1]))
+
 #            print('They are for (q,v):')
 #            print('Gamma_a')
 #            if len(large_a) != 0:
