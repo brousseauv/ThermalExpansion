@@ -1335,6 +1335,19 @@ class Gruneisen(FreeEnergy):
             sign_a5 = [0,0]
             sign_c = [0,0]
             sign_c5 = [0,0]
+            
+            verylarge_a = []
+            verylarge_c = []
+
+            omega_la = []
+            omega_lc = []
+            delta_la = []
+            delta_lc = []
+
+            dela = 0.
+            delc = 0.
+            delaabs = 0.
+            delcabs = 0.
 
             for q,v in itt.product(range(nqpt),range(nmode)):
 
@@ -1350,12 +1363,19 @@ class Gruneisen(FreeEnergy):
                     gru[1,q,v] = -self.equilibrium_volume[3]/(self.omega[1,q,v])*(self.omega[5,q,v]-self.omega[3,q,v])/(self.volume[5,3]-self.volume[3,3])
 
 
+                    #This is to check the average and absoluta avergae value of delta omega
+                    dela += self.omega[2,q,v]-self.omega[0,q,v]
+                    delc += self.omega[5,q,v]-self.omega[3,q,v]
+                    delaabs += np.abs(self.omega[2,q,v]-self.omega[0,q,v])
+                    delcabs += np.abs(self.omega[5,q,v]-self.omega[3,q,v])
                     # This is the VOLUMIC one (that is, gru(linear)/3)
                     self.gru_vol[q,v] = (gru[0,q,v] + gru[1,q,v])/3.
 
                     # Test to evaluate the impact of the very large Gruneisens on the final sum
                     if np.abs(gru[0,q,v])>5:
                         nlarge_5[0] +=1
+                        omega_la = self.omega[1,q,v]
+                        delta_la = self.omega[2,q,v] - self.omega[0,q,v]
                         #gru[0,q,v] = 0.
                         if np.sign(gru[0,q,v])>0:
                             sign_a5[0] +=1
@@ -1363,16 +1383,21 @@ class Gruneisen(FreeEnergy):
                             sign_a5[1] +=1
 
                         if np.abs(gru[0,q,v])>10:
+                            verylarge_a.append(1)
                             if np.sign(gru[0,q,v])>0:
                                 sign_a[0] +=1
                             else:
                                 sign_a[1] +=1
                             #gru[0,q,v] = 0.
                             nlarge[0] += 1
-                            large_a.append([q,v]) 
+                        else:
+                            verylarge_a.append(0)
+                        large_a.append([q,v]) 
 
                     if np.abs(gru[1,q,v])>5:
                         nlarge_5[1] +=1
+                        omega_lc = self.omega[1,q,v]
+                        delta_lc = self.omega[5,q,v]-self.omega[3,q,v]
                         #gru[1,q,v] = 0.
                         if np.sign(gru[1,q,v])>0:
                             sign_c5[0]+=1
@@ -1380,6 +1405,7 @@ class Gruneisen(FreeEnergy):
                             sign_c5[1]+=1
 
                         if np.abs(gru[1,q,v])>10:
+                            verylarge_c.append(1)
                             if np.sign(gru[1,q,v])>0:
                                 sign_c[0]+=1
                             else:
@@ -1387,7 +1413,9 @@ class Gruneisen(FreeEnergy):
 
                             #gru[1,q,v] = 0.
                             nlarge[1] += 1
-                            large_c.append([q,v])
+                        else:
+                            verylarge_c.append(0)
+                        large_c.append([q,v])
 
 
             print('For |gru|>5:')
@@ -1397,15 +1425,25 @@ class Gruneisen(FreeEnergy):
             print('Number of large Gruneisen parameters put to 0 : {} for gamma_a, {} for gamma_c'.format(nlarge[0],nlarge[1]))
             print('Gamma a : {}+, {}-, Gamma c : {}+, {}-'.format(sign_a[0],sign_a[1],sign_c[0],sign_c[1]))
 
-#            print('They are for (q,v):')
-#            print('Gamma_a')
-#            if len(large_a) != 0:
-#                for p in large_a:
-#                    print(p)
-#            print('Gamma_c')
-#            if len(large_c) != 0:
-#                for p in large_c:
-#                    print(p)
+            print('They are for (q,v):')
+            print('Gamma_a: (q,v), verylarge, omega0, delta omega')
+            if len(large_a) != 0:
+                if len(large_a)==1:
+                    print('{}, {}, {}, {}'.format(large_a,verylarge_a,omega_la,delta_la))
+                else:
+                    for p,pp in enumerate(large_a):
+                        print('{}, {}, {}, {}'.format(pp,verylarge_a[p],omega_la[p],delta_la[p]))
+
+            print('Gamma_c: (q,v), verylarge, omega0, delta omega')
+            if len(large_c) != 0:
+                if len(large_c)==1:
+                    print('{}, {}, {}, {}'.format(large_c,verylarge_c,omega_lc,delta_lc))
+                else:
+                    for p,pp in enumerate(large_c):
+                        print('{}, {}, {}, {}'.format(pp,verylarge_c[p],omega_lc[p],delta_lc[p]))
+
+            print('delta omega_a average (abs): {} ( {})'.format(dela/585.,delaabs/585.))
+            print('delta omega_ac average (abs): {} ( {})'.format(delc/585.,delcabs/585.))
 
 
 
@@ -1597,7 +1635,7 @@ class Gruneisen(FreeEnergy):
             
             plot = False
 
-           
+            ggg = open('{}_integrals.dat'.format(self.rootname),'w')   
 
             # First, get alpha(T)
 
@@ -1682,6 +1720,17 @@ class Gruneisen(FreeEnergy):
             self.acell_plushalf = np.array([aplushalf,cplushalf])
 
 #            self.acell2 = np.array([a2,c2])
+            'write details of compliance vs intergrals in <rootname>_integrals.dat file'''
+            ggg.write('Terms entering the thermal expansion of a\n\n')
+            ggg.write('{:15}  {:18}  {:18}  {:18}  {:18}\n'.format('Temperature (K)','compliance_a','integral_a','compliance_c','integral_c'))
+            for t, T in enumerate(self.temperature):
+                ggg.write('{:>15.0f}  {:>.12e}  {:>.12e}  {:>.12e}  {:>.12e}\n'.format(T,self.compliance[0,0]+self.compliance[0,1],integral_a[t],self.compliance[0,2],integral_c[t]))
+            ggg.write('\n\nTerms entering the thermal expansion of c\n\n')
+            ggg.write('{:15}  {:18}  {:18}  {:18}  {:18}\n'.format('Temperature (K)','compliance_a','integral_a','compliance_c','integral_c'))
+            for t, T in enumerate(self.temperature):
+                ggg.write('{:>15.0f}  {:>.12e}  {:>.12e}  {:>.12e}  {:>.12e}\n'.format(T,2*self.compliance[0,2],integral_a[t],self.compliance[2,2],integral_c[t]))
+
+            ggg.close()
 
             print('From Gruneisen parameters')
             print('da/a at T=0 = {}, da = {} bohr, a0 = {} bohr'.format(da0,da0*self.equilibrium_volume[1],da0*self.equilibrium_volume[1] + self.equilibrium_volume[1]))
@@ -2572,7 +2621,7 @@ def compute(
 #    calc.write_freeenergy()
         # write gibbs or helmholtz, equilibrium acells (P,T), list of temperatures, pressures, initial volumes
         # in netcdf format, will allow to load the data for plotting
-        calc.write_acell()
+#        calc.write_acell()
 
        # write equilibrium acells, in ascii file
     return
