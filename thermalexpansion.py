@@ -1445,6 +1445,32 @@ class Gruneisen(FreeEnergy):
             print('delta omega_a average (abs): {} ( {})'.format(dela/585.,delaabs/585.))
             print('delta omega_ac average (abs): {} ( {})'.format(delc/585.,delcabs/585.))
 
+            gg = open('{}_largegruneisens.dat'.format(self.rootname),'w')
+            gg.write('Some information about large Gruneisen parameters\n\n')
+            gg.write('Mode Gruneisens with |gamma|>5: there  are {} for gamma_a ({}+, {}-) and {} for gamma_c ({}+,{}-)\n'.format(nlarge_5[0],sign_a5[0],sign_a5[1],nlarge_5[1],sign_c5[0],sign_c5[1]))
+            gg.write('Mode Gruneisens with |gamma|>10: there  are {} for gamma_a ({}+, {}-) and {} for gamma_c ({}+,{}-)\n\n'.format(nlarge[0],sign_a[0],sign_a[1],nlarge[1],sign_c[0],sign_c[1]))
+
+            
+            gg.write('Gamma_a: <delta omega> = {:>.4e} Ha, <|delta omega|> = {:>.4e} Ha\n'.format(dela/585.,delaabs/585.))
+            gg.write('{:8}  {:9}  {:12}  {:12}\n'.format('(q,v)','verylarge','omega0','delta omega'))
+            if len(large_a) != 0:
+                if len(large_a) == 1:
+                    gg.write('{:^8} {:^8}  {:>.4e}    {:>.4e}\n'.format(str(large_a),str(verylarge_a),omega_la,delta_la)) 
+                else:
+                    for p,pp in enumerate(large_a):
+                        gg.write('{:^8} {:^8}  {:>.4e}    {:>.4e}\n'.format(str(pp),str(verylarge_a[p]),omega_la[p],delta_la[p]))
+            
+            gg.write('\n\nGamma_c: <delta omega> = {:>.8e} Ha, <|delta omega|> = {:>.8e} Ha\n'.format(delc/585.,delcabs/585.))
+            gg.write('{:8}  {:9}  {:12}  {:12}\n'.format('(q,v)','verylarge','omega0','delta omega'))
+            if len(large_c) != 0:
+                if len(large_c) == 1:
+                    gg.write('{:^8} {:^8}  {:>.4e}    {:>.4e}\n'.format(str(large_c),str(verylarge_c),omega_lc,delta_lc)) 
+                else:
+                    for p,pp in enumerate(large_c):
+                        gg.write('{:^8} {:^8}  {:>.4e}    {:>.4e}\n'.format(str(pp),str(verylarge_c[p]),omega_lc[p],delta_lc[p]))
+
+            gg.close()
+ 
 
 
             self.gru2 = gru2
