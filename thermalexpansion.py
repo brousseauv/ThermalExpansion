@@ -1374,8 +1374,8 @@ class Gruneisen(FreeEnergy):
                     # Test to evaluate the impact of the very large Gruneisens on the final sum
                     if np.abs(gru[0,q,v])>5:
                         nlarge_5[0] +=1
-                        omega_la = self.omega[1,q,v]
-                        delta_la = self.omega[2,q,v] - self.omega[0,q,v]
+                        omega_la.append(self.omega[1,q,v])
+                        delta_la.append(self.omega[2,q,v] - self.omega[0,q,v])
                         #gru[0,q,v] = 0.
                         if np.sign(gru[0,q,v])>0:
                             sign_a5[0] +=1
@@ -1396,8 +1396,8 @@ class Gruneisen(FreeEnergy):
 
                     if np.abs(gru[1,q,v])>5:
                         nlarge_5[1] +=1
-                        omega_lc = self.omega[1,q,v]
-                        delta_lc = self.omega[5,q,v]-self.omega[3,q,v]
+                        omega_lc.append(self.omega[1,q,v])
+                        delta_lc.append(self.omega[5,q,v]-self.omega[3,q,v])
                         #gru[1,q,v] = 0.
                         if np.sign(gru[1,q,v])>0:
                             sign_c5[0]+=1
