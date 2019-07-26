@@ -101,8 +101,8 @@ class FreeEnergy(object):
             if T<tol20 :
                 continue
 
-            if omega<tol6:
-                continue
+        #    if omega<tol6:
+        #        continue
 
             x = omega/(cst.kb_haK*T)
             # prevent divergence of the log 
@@ -219,7 +219,7 @@ class FreeEnergy(object):
 
         return B0
  
-class HelmholtzFreeEnergy(FreeEnergy):
+class GibbsFreeEnergy(FreeEnergy):
 
     #Input files
     ddb_flists = None
@@ -230,6 +230,7 @@ class HelmholtzFreeEnergy(FreeEnergy):
     temperature = None
 
     check_anaddb = False
+    equilibrium_index = None
 
     def __init__(self,
 
@@ -247,18 +248,22 @@ class HelmholtzFreeEnergy(FreeEnergy):
 
         bulk_modulus = None,
         bulk_modulus_units = None,
+        pressure = 0.0,
+        pressure_units = None,
+
+        equilibrium_index = None,
 
         **kwargs):
 
 
-        print('Computing Helmoltz free energy')
+        print('Computing Gibbs free energy')
         if not ddb_flists:
             raise Exception('Must provide a list of files for ddb_flists')
         if not out_flists:
             raise Exception('Must provide a list of files for out_flists')        
 
         if len(out_flists) != np.shape(ddb_flists)[0]:
-            raise Exception('ddb_flists and out_flists must have the same number of volumes')
+            raise Exception('ddb_flists and out_flists must have the same number of volumes,but ddb_flists has {} and out_flist has {}'.format(np.shape(ddb_flists)[0],len(out_flists)))
 
 
         #Set input files
@@ -268,18 +273,40 @@ class HelmholtzFreeEnergy(FreeEnergy):
         if not self.symmetry:
             raise Exception('Symmetry type must be specified')
 
-        super(HelmholtzFreeEnergy,self).__init__(rootname,units)
+        super(GibbsFreeEnergy,self).__init__(rootname,units)
         self.check_anaddb = check_anaddb
+
+        print(equilibrium_index)
+        self.equilibrium_index = equilibrium_index  #Transfer to Python indexing
+        if self.equilibrium_index is None:
+            raise Exception('Must provide the equilibrium volume index in volume list (in normal indexing)')
+        print('Equilibrium data is the {} volume in list'.format(self.equilibrium_index))
+        self.equilibrium_index -= 1
+        
 
         self.temperature = temperature
         self.ntemp = len(self.temperature) 
 
-        if bulk_modulus_units == 'GPa':
-            self.bulk_modulus = bulk_modulus*cst.gpa_to_habo3
-        elif bulk_modulus_units == 'HaBo3':
-            self.bulk_modulus = bulk_modulus
+        if bulk_modulus is not None:
+            if bulk_modulus_units == 'GPa':
+                self.bulk_modulus = bulk_modulus*cst.gpa_to_habo3
+            elif bulk_modulus_units == 'HaBo3':
+                self.bulk_modulus = bulk_modulus
+            else:
+                raise Exception('Bulk modulus units must be GPa or Ha/bohr^3')
+
+        self.pressure_units = pressure_units
+        self.pressure = pressure
+
+        if self.pressure_units == 'None':
+            raise Exception('Please specify pressure units')
+
+        if self.pressure_units == 'GPa':
+            self.pressure_gpa = self.pressure
+            self.pressure = self.pressure*cst.gpa_to_habo3
         else:
-            raise Exception('Bulk modulus units must be GPa or Ha/bohr^3')
+            self.pressure_gpa = self.pressure*cst.habo3_to_gpa
+
 
         # set parameter space dimensions
         nvol, nqpt = np.shape(self.ddb_flists)
@@ -298,6 +325,7 @@ class HelmholtzFreeEnergy(FreeEnergy):
         # Loop on all volumes
         for v in range(nvol):
 
+            print('volume {}'.format(v+1))
            # Open OUTfile
             gs = OutFile(out_flists[v])
             self.volume[v,0] = gs.volume
@@ -308,11 +336,14 @@ class HelmholtzFreeEnergy(FreeEnergy):
             # I do the acell equivalence check only one. There should be no need to check this, as all datasets must describe the same material!
 
         # what would be the right atol (absolute tolerance) for 2 equivalent lattice parameters? 1E-4, is it too loose?
-            if v==0: # REDONDANT SI JE SPECIFIE EXPLICITEMENT LE TYPE DE SYMETRIE... IL VA FALLOIR FAIRE LES 7 GROUPES ?? 
+            if v == 0: # REDONDANT SI JE SPECIFIE EXPLICITEMENT LE TYPE DE SYMETRIE... IL VA FALLOIR FAIRE LES 7 GROUPES ?? 
                 self.distinct_acell = self.reduce_acell(self.volume[v,1:])
                 nmode = 3*gs.natom
                 self.natom = gs.natom
                 self.omega = np.zeros((nvol,nqpt,nmode))
+
+            if v == self.equilibrium_index:
+                self.equilibrium_volume = self.volume[v,:]
 
             # get E
             E = gs.etotal[0]
@@ -349,8 +380,8 @@ class HelmholtzFreeEnergy(FreeEnergy):
                 # get Ftherm contribution
                 F_T += self.wtq[i]*self.get_fthermal(ddb.omega,nmode)
                 
-            # Sum free energy = E + F_0 + F_T
-            self.free_energy[v,:] = (E+F_0)*np.ones((self.ntemp)) + F_T
+            # Sum free energy = E + F_0 + F_T + PV
+            self.free_energy[v,:] = (E+F_0)*np.ones((self.ntemp)) + F_T + self.pressure*self.volume[v,0]*np.ones((self.ntemp))
 
         if self.check_anaddb:
             # Convert results in J/mol-cell, to compare with anaddb output
@@ -369,7 +400,7 @@ class HelmholtzFreeEnergy(FreeEnergy):
         # y^2 + z^2)
         
         # Minimize F, according to crystal symmetry
-        #self.temperature_dependent_acell = self.minimize_free_energy()
+        self.temperature_dependent_acell = self.minimize_free_energy()
 #        self.gruneisen = self.get_gruneisen(nqpt,nmode,nvol)
 #        self.acell_via_gruneisen = self.get_acell(nqpt,nmode)
         
@@ -384,218 +415,133 @@ class HelmholtzFreeEnergy(FreeEnergy):
             import matplotlib.pyplot as plt
         
         if self.symmetry == 'cubic':
-            
+
             fit = np.zeros((self.ntemp))
 
             for t, T in enumerate(self.temperature):
-                afit = np.polyfit(self.volume[:,1],self.free_energy[:,t],2)
-                fit[t] = -afit[1]/(2*afit[0])
+#                afit = np.polyfit(self.volume[:,1],self.free_energy[:,t],2)
+#                fit[t] = -afit[1]/(2*afit[0])
+                p0 = [self.equilibrium_volume[0],self.free_energy[1,t],self.bulk_modulus,4.0]
+                popt, pcov = curve_fit(eos.murnaghan_EV, self.volume[:,0],self.free_enetgy[:,t],p0)
+                fit[t] = (4*popt[0])**(1./3)
 
-                if plot:
-                    xfit = np.linspace(9.50,12.0,100)
-                    yfit = afit[0]*xfit**2 + afit[1]*xfit + afit[2]
-                    plt.plot(self.volume[:,1],self.free_energy[:,t],marker='o')
-                    plt.plot(xfit,yfit)
+#                if plot:
+#                    xfit = np.linspace(9.50,12.0,100)
+#                    yfit = afit[0]*xfit**2 + afit[1]*xfit + afit[2]
+#                    plt.plot(self.volume[:,1],self.free_energy[:,t],marker='o')
+#                    plt.plot(xfit,yfit)
 
-            if plot:
-                plt.show()
+#            if plot:
+#                plt.show()
 
             fit = np.expand_dims(fit,axis=0)
             return fit
 
-#    def get_gruneisen(self, nqpt, nmode,nvol):
-#
-#        plot = True 
-#
-#        if plot :
-#            import matplotlib.pyplot as plt
-#            fig,arr = plt.subplots(1,2,figsize = (12,6), sharey = False,squeeze=False)
-#
-#        if self.symmetry == 'cubic':
-#            
-#            gru = np.zeros((nqpt,nmode))
-#
-#            for q,v in itt.product(range(nqpt),range(nmode)):
-#
-#                if q==0 and v<3:
-#                # put Gruneisen at zero for acoustic modes at Gamma
-#                    gru[q,v] = 0
-#                else:
-#                    gru[q,v] = -1*np.polyfit(np.log(self.volume[:,1]), np.log(self.omega[:,q,v]),1)[0]
-#               
-#            # correct divergence at q-->0
-#            # this would extrapolate Gruneisen at q=0 from neighboring qpts
-#            #x = [np.linalg.norm(self.qred[1,:]),np.linalg.norm(self.qred[2,:])]
-#            #for v in range(3):
-#            #    y = [gru[1,v],gru[2,v]]
-#            #    gru[0,v] = np.polyfit(x,y,1)[1]
-#            
-#            gru2 = self.gruneisen_from_dynmat(nqpt,nmode,nvol)
-#            self.gru2 = gru2
-#
-#            #print('slope')
-#            #print('delta omega {}'.format(self.omega[2,1,:]-self.omega[0,1,:]))
-#            #print('omega0 {}'.format(self.omega[1,1,:]))
-#            #print('gruneisen {}'.format(gru[1,:]))
-# 
-#            if plot :
-#                #x = np.array([1,2,3])
-#                #x = [np.linalg.norm(self.qred[0,:]),np.linalg.norm(self.qred[1,:]),np.linalg.norm(self.qred[2,:]),np.linalg.norm(self.qred[3,:])]
-#                #for v in range(nmode):
-#                #    plt.plot(x,gru[:4,:],marker='o')
-#                
-#                # plot mode Gruneisen vs frequency
-#                col = ['red','orange','yellow','green','blue','purple']
-#                for v in range(nmode):
-#                    arr[0][0].plot(self.omega[1,:,v]*cst.ha_to_ev*1000,gru[:,v],color=col[v],marker = 'o',linestyle='None')
-#                    arr[0][0].set_xlabel('Frequency (meV)')
-#                    arr[0][0].set_ylabel('Mode Gruneisen')
-#
-#                    arr[0][1].plot(self.omega[1,:,v]*cst.ha_to_ev*1000,gru2[:,v],color=col[v],marker = 'o',linestyle='None')
-#                    arr[0][1].set_xlabel('Frequency (meV)')
-#                    arr[0][1].set_ylabel('Mode Gruneisen')
-#                    arr[0][0].set_title(r'Slope ln$\omega$ vs lnV') 
-#                    arr[0][1].set_title(r'Dynamical matrix') 
-#                    arr[0][0].plot(self.omega[1,0,v]*cst.ha_to_ev*1000,gru[0,v],marker='d',color='black',linestyle='None')
-#                    arr[0][0].plot(self.omega[1,16,v]*cst.ha_to_ev*1000,gru[16,v],marker='s',color='black',linestyle='None')
-#
-#
-##            if plot:
-##                for c in range(nqpt): 
-##                    for i in range(nmode/2):
-##                        plt.plot(np.log(self.volume[:,1]),np.log(self.omega[:,c,i]),marker='x')
-##                        plt.xlabel('ln V')
-##                        plt.ylabel('ln omega')
-#
-#                plt.savefig('gruneisen_GaAs2.png')
-#                plt.show()
-#
-#            return gru 
-            
-#    def get_acell(self, nqpt, nmode):
-#
-#        # Evaluate acell(T) from Gruneisen parameters
-#        if self.symmetry == 'cubic':
-#            
-#            plot = False
-#            # First, get alpha(T)
-#            x = np.zeros((nqpt,nmode,self.ntemp)) # q,v,t
-#            for t in range(self.ntemp):
-#                x[:,:,t] = self.omega[1,:,:]/(cst.kb_haK*self.temperature[t])
-#            cv = cst.kb_haK*x**2*np.exp(x)/(np.exp(x)-1)**2
-#            bose = 1./(np.exp(x)-1)
-#            bose[0,:3,:] = 0 # Check what Gabriel did)
-#            hwt = np.einsum('qv,qvt->qvt',self.omega[1,:,:],bose)
-#            # fix this properly later!!! 
-#            cv[0,:3,:] = 0
-#
-#            alpha = np.einsum('q,qvt,qv->t',self.wtq,cv,self.gruneisen)/(self.volume[1,0]*self.bulk_modulus)
-#            alpha2 = np.einsum('q,qvt,qv->t',self.wtq,cv,self.gru2)/(self.volume[1,0]*self.bulk_modulus)
-#
-#            # Then, get a(T)
-#            integral = 1./(self.bulk_modulus*self.volume[1,0])*np.einsum('q,qvt,qv->t',self.wtq,hwt,self.gruneisen)
-#            a = self.volume[1,1]*(integral + 1)
-#
-#            if plot:
-#                import matplotlib.pyplot as plt
-#                fig,arr = plt.subplots(1,2,figsize=(15,5),sharey=False)
-#                arr[0].plot(self.temperature,alpha*1E6) 
-#                arr[1].plot(self.temperature,alpha2*1E6) 
-#                arr[0].set_ylabel(r'$\alpha$ ($10^{-6}$ K$^{-1}$)')
-#                arr[0].set_xlabel(r'Temperature (K)')
-#                arr[1].set_xlabel(r'Temperature (K)')
-#                arr[0].set_title(r'Slope ln$\omega$ vs lnV') 
-#                arr[1].set_title(r'Dynamical matrix') 
-#
-#
-#                plt.savefig('alpha_GaAs.png')
-#                plt.show() 
-#            
-#            
-#            return a
-#    def gruneisen_from_dynmat(self,nqpt,nmode,nvol):
-#
-#        # This computes the gruneisen parameters from the change in the dynamical matrix
-#        # like phonopy and anaddb
-#            
-#        # for now, I reopen all files, but later on change the loop ordering (anyway, it should not do everything linearly, but rather use functions depending of input parameters
-#
-#        gru = np.zeros((nqpt,nmode))
-#        dplus =  2
-#        d0 = 1
-#        dminus = 0 # put this in a function
-#        dV = self.volume[dplus,1] - self.volume[dminus,1]
-#        V0 = self.volume[d0,1]
-#
-#        for i in range(nqpt):
-#            dD = np.zeros((nmode,nmode),dtype=complex)
-#            for v in range(nvol):
-#
-#                # open the ddb file
-#                ddb = DdbFile(self.ddb_flists[v][i])
-#
-#                # Check if qpt is Gamma
-#                is_gamma = ddb.is_gamma
-#
-#                # this is taken from Gabriel's code, directly. for testing purposes.
-#                amu = np.zeros(ddb.natom)
-#                for ii in np.arange(ddb.natom):
-#    
-#                    jj = ddb.typat[ii]
-#                    amu[ii] = ddb.amu[jj-1]
-#
-#                dynmat = ddb.get_mass_scaled_dynmat_cart()
-#
-#                if v==dplus:
-#                    dD += dynmat
-#                if v==dminus:
-#                    dD -= dynmat
-#                if v==d0:
-#                    eigval, eigvect = np.linalg.eigh(dynmat)
-#
-#                    for ii in np.arange(ddb.natom):
-#                        for dir1 in np.arange(3):
-#                            ipert = ii*3 + dir1
-#                            eigvect[ipert] = eigvect[ipert]*np.sqrt(cst.me_amu/amu[ii])
-#                    
-#                    if is_gamma:
-#                        eigval[0] = 0.0
-#                        eigval[1] = 0.0
-#                        eigval[2] = 0.0
-#
-#                    for ieig,eig in enumerate(eigval):
-#                        if eig < 0.0:
-#                            warnings.warn('Negative eigenvalue changed to 0')
-#                            eigval[ieig] = 0.0
-#            #if i==1:
-#            #    print(dD)
-#            dD_at_q = []
-#            
-#            for eig in eigvect:
-#
-#                dD_at_q.append(np.vdot(np.transpose(eig), np.dot(dD,eig)).real)   
-##                if i==1:
-#                #    print(eig)
-#               #     print(np.dot(dD,eig))
-#                    #print(dD_at_q)
-#                    
-#
-#            dD_at_q = np.array(dD_at_q)
-#
-#            for v in range(nmode):
-#                if i==0 and v<3:
-#                    gru[i,v] = 0
-#                else:
-#                    gru[i,v] = -V0*dD_at_q[v]/(2*eigval[v].real*dV)
-#            if i==1:
-#
-#                print('Dynamical matrix')
-#                print('delta omega^2 {}'.format(dD_at_q))
-#                print('omega0 {}'.format(eigval[:]))
-#                print('gruneisen {}'.format(gru[i,:]))
-#
-#
-#        return gru
+
+        if self.symmetry == 'hexagonal':
+
+            # Only independent fit for now...
+            fit = np.zeros((2,self.ntemp))
+
+            import matplotlib.pyplot as plt
+            import matplotlib.cm as cm
+            fig,arr = plt.subplots(1,2,squeeze=True)
+            mycmap = cm.jet
+            color_idx = np.linspace(0, 1, self.ntemp)
+            print(self.equilibrium_volume)
+            for t,T in enumerate(self.temperature):
+
+                # First, treat a
+                # a0,c0, E0, B0, B0' 
+                '''or, B0=9.8GPa, B0'=7.6, B0prime has no units!!!'''
+                p0 = [self.equilibrium_volume[1],self.equilibrium_volume[3], self.free_energy[self.equilibrium_index,t], 8.0*cst.gpa_to_habo3,8.0]
+                popt, pcov= curve_fit(eos.murnaghan_EV_axial, self.volume[:,0], self.free_energy[:,t], p0)
+                print('\nfor T={}K, a= {} c={}'.format(T,popt[0],popt[1]))
+
+
+                delta = [0.0031372478999998066,0.001351464000000746]
+#                p0 = [self.equilibrium_volume[0], self.free_energy[self.equilibrium_index,t], 9.8*cst.gpa_to_habo3,7.6]
+#                popt, pcov= curve_fit(eos.murnaghan_EV, self.volume[:,0], self.free_energy[:,t], p0)
+#                aa = np.sqrt(2*popt[0]/(np.sqrt(3)*self.equilibrium_volume[3]))
+#                print('for T={}K, popt= {},a={}'.format(T,popt,aa-delta[0]))
+
+                p0 = [self.equilibrium_volume[0], self.free_energy[self.equilibrium_index,t], 8.0*cst.gpa_to_habo3,8.0]
+                popt, pcov= curve_fit(eos.murnaghan_EV, self.volume[:,0], self.free_energy[:,t], p0)
+#                cc = 2*popt[0]/(np.sqrt(3)*self.equilibrium_volume[1]**2)
+#                print('for T={}K, popt= {},c={}'.format(T,popt[0],cc-delta[1]))
+#                print(self.free_energy[:,t])
+
+                arr[0].plot(self.volume[0,0],self.free_energy[0,t],marker='o',linestyle='None',color=mycmap(color_idx[t]))
+                arr[0].plot(self.volume[1:10,0],self.free_energy[1:10,t],marker='D',linestyle='None',color=mycmap(color_idx[t]))
+                arr[1].plot(self.volume[0,0],self.free_energy[0,t],marker='o',linestyle='None',color=mycmap(color_idx[t]))
+                arr[1].plot(self.volume[10:,0],self.free_energy[10:,t],marker='s',linestyle='None',color=mycmap(color_idx[t]))
+
+                
+
+
+
+                fit[:,t] = popt[:2]
+            plt.show()
+
+            return fit
+
+    def write_acell(self):
+
+        outfile = 'OUT/{}_acell_from_eos.dat'.format(self.rootname)
+        nc_outfile = 'OUT/{}_acell.nc'.format(self.rootname)
+
+        #  First, write output in netCDF format
+        create_directory(nc_outfile)
+
+        with nc.Dataset(nc_outfile, 'w') as dts:
+
+            dts.createDimension('number_of_temperatures', self.ntemp)
+            dts.createDimension('number_of_lattice_parameters', len(self.distinct_acell))
+
+            data = dts.createVariable('temperature','d', ('number_of_temperatures'))
+            data[:] = self.temperature[:]
+            data.units = 'Kelvin'
+
+
+            data = dts.createVariable('acell_from_gibbs','d',('number_of_lattice_parameters','number_of_temperatures'))
+            data[:,:] = self.temperature_dependent_acell[:,:]
+            data.units = 'Bohr radius'
+
+
+        # Write also results from Free energy minimisation
+        outfile = 'OUT/{}_acell_from_eos.dat'.format(self.rootname)
+
+        create_directory(outfile)
+
+        with open(outfile, 'w') as f:
+
+            f.write('Temperature dependent lattice parameters via Gibbs free energy\n\n')
+
+            if self.symmetry == 'cubic':
+
+
+                f.write('{:12}    {:12}\n'.format('Temperature','a (bohr)'))
+                for t,T in enumerate(self.temperature):
+                    f.write('{:>8.1f} K    {:>12.8f}\n'.format(T,self.temperature_dependent_acell[0,t]))
+
+                f.close()
+
+
+            if self.symmetry == 'hexagonal':
+
+                f.write('{:12}      {:<12}    {:<12}\n'.format('Temperature','a (bohr)','c (bohr)'))
+                for t,T in enumerate(self.temperature):
+                    f.write('{:>8.1f} K    {:>12.8f}    {:>12.8f}\n'.format(T,self.temperature_dependent_acell[0,t],self.temperature_dependent_acell[1,t]))
+
+                # Independent fit: fitg, 2D fit: fit2dg
+#                f.write('\n\nTemperature dependent lattice parameters via Gibbs free energy\n\n')
+#                f.write('{:12}      {:<12}    {:<12}\n'.format('Temperature','a (bohr)','c (bohr)'))
+#                for t,T in enumerate(self.temperature):
+ #                   f.write('{:>8.1f} K    {:>12.8f}    {:>12.8f}\n'.format(T,self.fitg[0,t],self.fitg[1,t]))
+
+
+
+                f.close()
 
 
 class Gruneisen(FreeEnergy):
@@ -613,6 +559,7 @@ class Gruneisen(FreeEnergy):
 
     check_anaddb = False
     manual_correction = False
+    verbose = False
 
     def __init__(self,
 
@@ -635,6 +582,7 @@ class Gruneisen(FreeEnergy):
         pressure_units = None,
         bulk_modulus_units = None,
         manual_correction = False,
+        verbose = False,
 
         **kwargs):
 
@@ -664,6 +612,7 @@ class Gruneisen(FreeEnergy):
         super(Gruneisen,self).__init__(rootname,units)
         self.check_anaddb = check_anaddb
         self.manual_correction = manual_correction
+        self.verbose = verbose
 
         self.temperature = temperature
         self.ntemp = len(self.temperature) 
@@ -1241,7 +1190,7 @@ class Gruneisen(FreeEnergy):
 
     def get_gruneisen(self, nqpt, nmode,nvol):
 
-        plot = False
+        plot = True
 
         if plot :
             import matplotlib.pyplot as plt
@@ -1418,59 +1367,60 @@ class Gruneisen(FreeEnergy):
                         large_c.append([q,v])
 
 
-            print('For |gru|>5:')
-            print('Number of large Gruneisen parameters put to 0 : {} for gamma_a, {} for gamma_c'.format(nlarge_5[0],nlarge_5[1]))
-            print('Gamma a : {}+, {}-, Gamma c : {}+, {}-'.format(sign_a5[0],sign_a5[1],sign_c5[0],sign_c5[1]))
-            print('For |gru|>10:')
-            print('Number of large Gruneisen parameters put to 0 : {} for gamma_a, {} for gamma_c'.format(nlarge[0],nlarge[1]))
-            print('Gamma a : {}+, {}-, Gamma c : {}+, {}-'.format(sign_a[0],sign_a[1],sign_c[0],sign_c[1]))
+            if self.verbose:
+                print('For |gru|>5:')
+                print('Number of large Gruneisen parameters put to 0 : {} for gamma_a, {} for gamma_c'.format(nlarge_5[0],nlarge_5[1]))
+                print('Gamma a : {}+, {}-, Gamma c : {}+, {}-'.format(sign_a5[0],sign_a5[1],sign_c5[0],sign_c5[1]))
+                print('For |gru|>10:')
+                print('Number of large Gruneisen parameters put to 0 : {} for gamma_a, {} for gamma_c'.format(nlarge[0],nlarge[1]))
+                print('Gamma a : {}+, {}-, Gamma c : {}+, {}-'.format(sign_a[0],sign_a[1],sign_c[0],sign_c[1]))
 
-            print('They are for (q,v):')
-            print('Gamma_a: (q,v), verylarge, omega0, delta omega')
-            if len(large_a) != 0:
-                if len(large_a)==1:
-                    print('{}, {}, {}, {}'.format(large_a,verylarge_a,omega_la,delta_la))
-                else:
-                    for p,pp in enumerate(large_a):
-                        print('{}, {}, {}, {}'.format(pp,verylarge_a[p],omega_la[p],delta_la[p]))
+                print('They are for (q,v):')
+                print('Gamma_a: (q,v), verylarge, omega0, delta omega')
+                if len(large_a) != 0:
+                    if len(large_a)==1:
+                        print('{}, {}, {}, {}'.format(large_a,verylarge_a,omega_la,delta_la))
+                    else:
+                        for p,pp in enumerate(large_a):
+                            print('{}, {}, {}, {}'.format(pp,verylarge_a[p],omega_la[p],delta_la[p]))
 
-            print('Gamma_c: (q,v), verylarge, omega0, delta omega')
-            if len(large_c) != 0:
-                if len(large_c)==1:
-                    print('{}, {}, {}, {}'.format(large_c,verylarge_c,omega_lc,delta_lc))
-                else:
-                    for p,pp in enumerate(large_c):
-                        print('{}, {}, {}, {}'.format(pp,verylarge_c[p],omega_lc[p],delta_lc[p]))
+                print('Gamma_c: (q,v), verylarge, omega0, delta omega')
+                if len(large_c) != 0:
+                    if len(large_c)==1:
+                        print('{}, {}, {}, {}'.format(large_c,verylarge_c,omega_lc,delta_lc))
+                    else:
+                        for p,pp in enumerate(large_c):
+                            print('{}, {}, {}, {}'.format(pp,verylarge_c[p],omega_lc[p],delta_lc[p]))
 
-            print('delta omega_a average (abs): {} ( {})'.format(dela/585.,delaabs/585.))
-            print('delta omega_ac average (abs): {} ( {})'.format(delc/585.,delcabs/585.))
+                print('delta omega_a average (abs): {} ( {})'.format(dela/585.,delaabs/585.))
+                print('delta omega_ac average (abs): {} ( {})'.format(delc/585.,delcabs/585.))
 
-            gg = open('{}_largegruneisens.dat'.format(self.rootname),'w')
-            gg.write('Some information about large Gruneisen parameters\n\n')
-            gg.write('Mode Gruneisens with |gamma|>5: there  are {} for gamma_a ({}+, {}-) and {} for gamma_c ({}+,{}-)\n'.format(nlarge_5[0],sign_a5[0],sign_a5[1],nlarge_5[1],sign_c5[0],sign_c5[1]))
-            gg.write('Mode Gruneisens with |gamma|>10: there  are {} for gamma_a ({}+, {}-) and {} for gamma_c ({}+,{}-)\n\n'.format(nlarge[0],sign_a[0],sign_a[1],nlarge[1],sign_c[0],sign_c[1]))
+                gg = open('{}_largegruneisens.dat'.format(self.rootname),'w')
+                gg.write('Some information about large Gruneisen parameters\n\n')
+                gg.write('Mode Gruneisens with |gamma|>5: there  are {} for gamma_a ({}+, {}-) and {} for gamma_c ({}+,{}-)\n'.format(nlarge_5[0],sign_a5[0],sign_a5[1],nlarge_5[1],sign_c5[0],sign_c5[1]))
+                gg.write('Mode Gruneisens with |gamma|>10: there  are {} for gamma_a ({}+, {}-) and {} for gamma_c ({}+,{}-)\n\n'.format(nlarge[0],sign_a[0],sign_a[1],nlarge[1],sign_c[0],sign_c[1]))
 
-            
-            gg.write('Gamma_a: <delta omega> = {:>.4e} Ha, <|delta omega|> = {:>.4e} Ha\n'.format(dela/585.,delaabs/585.))
-            gg.write('{:8}  {:9}  {:12}  {:12}\n'.format('(q,v)','verylarge','omega0','delta omega'))
-            if len(large_a) != 0:
-                if len(large_a) == 1:
-                    gg.write('{:^8} {:^8}  {:>.4e}    {:>.4e}\n'.format(str(large_a),str(verylarge_a),omega_la,delta_la)) 
-                else:
-                    for p,pp in enumerate(large_a):
-                        gg.write('{:^8} {:^8}  {:>.4e}    {:>.4e}\n'.format(str(pp),str(verylarge_a[p]),omega_la[p],delta_la[p]))
-            
-            gg.write('\n\nGamma_c: <delta omega> = {:>.8e} Ha, <|delta omega|> = {:>.8e} Ha\n'.format(delc/585.,delcabs/585.))
-            gg.write('{:8}  {:9}  {:12}  {:12}\n'.format('(q,v)','verylarge','omega0','delta omega'))
-            if len(large_c) != 0:
-                if len(large_c) == 1:
-                    gg.write('{:^8} {:^8}  {:>.4e}    {:>.4e}\n'.format(str(large_c),str(verylarge_c),omega_lc,delta_lc)) 
-                else:
-                    for p,pp in enumerate(large_c):
-                        gg.write('{:^8} {:^8}  {:>.4e}    {:>.4e}\n'.format(str(pp),str(verylarge_c[p]),omega_lc[p],delta_lc[p]))
+                
+                gg.write('Gamma_a: <delta omega> = {:>.4e} Ha, <|delta omega|> = {:>.4e} Ha\n'.format(dela/585.,delaabs/585.))
+                gg.write('{:8}  {:9}  {:12}  {:12}\n'.format('(q,v)','verylarge','omega0','delta omega'))
+                if len(large_a) != 0:
+                    if len(large_a) == 1:
+                        gg.write('{:^8} {:^8}  {:>.4e}    {:>.4e}\n'.format(str(large_a),str(verylarge_a),omega_la,delta_la)) 
+                    else:
+                        for p,pp in enumerate(large_a):
+                            gg.write('{:^8} {:^8}  {:>.4e}    {:>.4e}\n'.format(str(pp),str(verylarge_a[p]),omega_la[p],delta_la[p]))
+                
+                gg.write('\n\nGamma_c: <delta omega> = {:>.8e} Ha, <|delta omega|> = {:>.8e} Ha\n'.format(delc/585.,delcabs/585.))
+                gg.write('{:8}  {:9}  {:12}  {:12}\n'.format('(q,v)','verylarge','omega0','delta omega'))
+                if len(large_c) != 0:
+                    if len(large_c) == 1:
+                        gg.write('{:^8} {:^8}  {:>.4e}    {:>.4e}\n'.format(str(large_c),str(verylarge_c),omega_lc,delta_lc)) 
+                    else:
+                        for p,pp in enumerate(large_c):
+                            gg.write('{:^8} {:^8}  {:>.4e}    {:>.4e}\n'.format(str(pp),str(verylarge_c[p]),omega_lc[p],delta_lc[p]))
 
-            gg.close()
- 
+                gg.close()
+     
 
 
             self.gru2 = gru2
@@ -1497,6 +1447,8 @@ class Gruneisen(FreeEnergy):
 #                    arr[0][0].plot(self.omega[1,16,v]*cst.ha_to_ev*1000,gru[16,v],marker='s',color='black',linestyle='None')
                     arr[0][0].grid(b=True, which='major')
                     arr[0][1].grid(b=True, which='major')
+                    arr[0][0].set_ylim(-5,5)
+                    arr[0][1].set_ylim(-5,5)
 
 #                    #with linear fit
 #                    arr[1][0].plot(self.omega[1,:,v]*cst.ha_to_ev*1000,gru2[0,:,v],color=col[v],marker = 'o',linestyle='None')
@@ -1527,7 +1479,7 @@ class Gruneisen(FreeEnergy):
                 create_directory(outfile)
 
                 plt.savefig(outfile)
-#                plt.show()
+                plt.show()
 
             return gru 
 
@@ -1661,7 +1613,8 @@ class Gruneisen(FreeEnergy):
             
             plot = False
 
-            ggg = open('{}_integrals.dat'.format(self.rootname),'w')   
+            if self.verbose:
+                ggg = open('{}_integrals.dat'.format(self.rootname),'w')   
 
             # First, get alpha(T)
 
@@ -1746,17 +1699,18 @@ class Gruneisen(FreeEnergy):
             self.acell_plushalf = np.array([aplushalf,cplushalf])
 
 #            self.acell2 = np.array([a2,c2])
-            'write details of compliance vs intergrals in <rootname>_integrals.dat file'''
-            ggg.write('Terms entering the thermal expansion of a\n\n')
-            ggg.write('{:15}  {:18}  {:18}  {:18}  {:18}\n'.format('Temperature (K)','compliance_a','integral_a','compliance_c','integral_c'))
-            for t, T in enumerate(self.temperature):
-                ggg.write('{:>15.0f}  {:>.12e}  {:>.12e}  {:>.12e}  {:>.12e}\n'.format(T,self.compliance[0,0]+self.compliance[0,1],integral_a[t],self.compliance[0,2],integral_c[t]))
-            ggg.write('\n\nTerms entering the thermal expansion of c\n\n')
-            ggg.write('{:15}  {:18}  {:18}  {:18}  {:18}\n'.format('Temperature (K)','compliance_a','integral_a','compliance_c','integral_c'))
-            for t, T in enumerate(self.temperature):
-                ggg.write('{:>15.0f}  {:>.12e}  {:>.12e}  {:>.12e}  {:>.12e}\n'.format(T,2*self.compliance[0,2],integral_a[t],self.compliance[2,2],integral_c[t]))
+            if self.verbose:
+                'write details of compliance vs intergrals in <rootname>_integrals.dat file'''
+                ggg.write('Terms entering the thermal expansion of a\n\n')
+                ggg.write('{:15}  {:18}  {:18}  {:18}  {:18}\n'.format('Temperature (K)','compliance_a','integral_a','compliance_c','integral_c'))
+                for t, T in enumerate(self.temperature):
+                    ggg.write('{:>15.0f}  {:>.12e}  {:>.12e}  {:>.12e}  {:>.12e}\n'.format(T,self.compliance[0,0]+self.compliance[0,1],integral_a[t],self.compliance[0,2],integral_c[t]))
+                ggg.write('\n\nTerms entering the thermal expansion of c\n\n')
+                ggg.write('{:15}  {:18}  {:18}  {:18}  {:18}\n'.format('Temperature (K)','compliance_a','integral_a','compliance_c','integral_c'))
+                for t, T in enumerate(self.temperature):
+                    ggg.write('{:>15.0f}  {:>.12e}  {:>.12e}  {:>.12e}  {:>.12e}\n'.format(T,2*self.compliance[0,2],integral_a[t],self.compliance[2,2],integral_c[t]))
 
-            ggg.close()
+                ggg.close()
 
             print('From Gruneisen parameters')
             print('da/a at T=0 = {}, da = {} bohr, a0 = {} bohr'.format(da0,da0*self.equilibrium_volume[1],da0*self.equilibrium_volume[1] + self.equilibrium_volume[1]))
@@ -2259,8 +2213,9 @@ class Gruneisen(FreeEnergy):
 
 
 
-class GibbsFreeEnergy(object):
+class HelmholtzFreeEnergy(object):
 
+    ''' This class is deprecated. It should be removed'''
     #Input files
     ddb_flists = None
     out_flists = None
@@ -2281,7 +2236,8 @@ class GibbsFreeEnergy(object):
         **kwargs):
 
 
-        print('Computing Gibbs free energy')
+       
+        print('Computing Helmholtz free energy')
         if not ddb_flists:
             raise Exception('Must provide a list of files for ddb_flists')
         if not out_flists:
@@ -2553,6 +2509,8 @@ def compute(
         initial_params = None,
         static_plot = False,
         manual_correction = False,
+        equilibrium_index = None,
+        verbose = False,
 
         **kwargs):
 
@@ -2597,6 +2555,8 @@ def compute(
                     bulk_modulus = bulk_modulus,
                     bulk_modulus_units = bulk_modulus_units,
     
+                    equilibrium_index = equilibrium_index,
+                    verbose = verbose,
         
                     **kwargs)
      
@@ -2620,11 +2580,12 @@ def compute(
                     bulk_modulus_units = bulk_modulus_units,
 
                     manual_correction = manual_correction,
-    
+                    verbose = verbose,
                     **kwargs)
 
 
         else:
+            raise Exception("For thermal expansion, you should choose between Gibbs minimization or Gruneisens!")
             calc = HelmholtzFreeEnergy(
                     out_flists = out_flists, 
                     ddb_flists = ddb_flists,
@@ -2639,6 +2600,7 @@ def compute(
         
                     bulk_modulus = bulk_modulus,
                     bulk_modulus_units = bulk_modulus_units,
+                    verbose = verbose,
     
                     **kwargs)
 
@@ -2647,7 +2609,7 @@ def compute(
 #    calc.write_freeenergy()
         # write gibbs or helmholtz, equilibrium acells (P,T), list of temperatures, pressures, initial volumes
         # in netcdf format, will allow to load the data for plotting
-#        calc.write_acell()
+        calc.write_acell()
 
        # write equilibrium acells, in ascii file
     return
