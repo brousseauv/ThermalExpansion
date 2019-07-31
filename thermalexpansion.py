@@ -382,6 +382,7 @@ class GibbsFreeEnergy(FreeEnergy):
                 
             # Sum free energy = E + F_0 + F_T + PV
             self.free_energy[v,:] = (E+F_0)*np.ones((self.ntemp)) + F_T + self.pressure*self.volume[v,0]*np.ones((self.ntemp))
+            print(self.pressure)
 
         if self.check_anaddb:
             # Convert results in J/mol-cell, to compare with anaddb output
@@ -445,11 +446,26 @@ class GibbsFreeEnergy(FreeEnergy):
 
             import matplotlib.pyplot as plt
             import matplotlib.cm as cm
-            fig,arr = plt.subplots(1,2,squeeze=True)
+            fig,arr = plt.subplots(2,3,sharey=False,figsize=(10,10))
+            ax = arr[1,2].twinx()
             mycmap = cm.jet
             color_idx = np.linspace(0, 1, self.ntemp)
             print(self.equilibrium_volume)
+
             for t,T in enumerate(self.temperature):
+
+
+                # define bounds for optimal parameters
+                bounds_axial = [[0.95*self.equilibrium_volume[1],0.95*self.equilibrium_volume[3],1.05*self.free_energy[self.equilibrium_index,t],0.,0.],
+                                [1.05*self.equilibrium_volume[1],1.05*self.equilibrium_volume[3],0.95*self.free_energy[self.equilibrium_index,t],500.,15.]]
+                bounds_vol = [[0.95*self.equilibrium_volume[0],1.05*self.free_energy[self.equilibrium_index,t],0.,0.],
+                                [1.05*self.equilibrium_volume[0],0.95*self.free_energy[self.equilibrium_index,t],500.,15.]]
+                va = np.sqrt(3)/2*self.equilibrium_volume[3]
+                vc = np.sqrt(3)/2*(self.equilibrium_volume[1]**2)
+                bounds_a = [[va*(0.95*self.equilibrium_volume[1])**2,1.05*self.free_energy[self.equilibrium_index,t],0.,0.],
+                                [va*(1.05*self.equilibrium_volume[1])**2,0.95*self.free_energy[self.equilibrium_index,t],500.,15.]]
+                bounds_c = [[0.95*vc*self.equilibrium_volume[3],1.05*self.free_energy[self.equilibrium_index,t],0.,0.],
+                                [1.05*vc*self.equilibrium_volume[3],0.95*self.free_energy[self.equilibrium_index,t],500.,15.]]
 
                 # First, treat a
                 # a0,c0, E0, B0, B0' 
@@ -458,29 +474,110 @@ class GibbsFreeEnergy(FreeEnergy):
                 popt, pcov= curve_fit(eos.murnaghan_EV_axial, self.volume[:,0], self.free_energy[:,t], p0)
                 print('\nfor T={}K, a= {} c={}'.format(T,popt[0],popt[1]))
 
-
                 delta = [0.0031372478999998066,0.001351464000000746]
-#                p0 = [self.equilibrium_volume[0], self.free_energy[self.equilibrium_index,t], 9.8*cst.gpa_to_habo3,7.6]
-#                popt, pcov= curve_fit(eos.murnaghan_EV, self.volume[:,0], self.free_energy[:,t], p0)
-#                aa = np.sqrt(2*popt[0]/(np.sqrt(3)*self.equilibrium_volume[3]))
-#                print('for T={}K, popt= {},a={}'.format(T,popt,aa-delta[0]))
+                # Fit only the a variation
+                p0a = [self.equilibrium_volume[0], self.free_energy[self.equilibrium_index,t], 8.0*cst.gpa_to_habo3,8.0]
+#                popta, pcova= curve_fit(eos.murnaghan_EV, self.volume[:7,0], self.free_energy[:7,t], p0a,bounds=bounds_a)
+                popta, pcova= curve_fit(eos.murnaghan_EV, self.volume[:10,0], self.free_energy[:10,t], p0a)
+                aa = np.sqrt(2*popta[0]/(np.sqrt(3)*self.equilibrium_volume[3]))
+                print('a data only:, v={}, a={}'.format(popta[0],aa-delta[0]))
 
-                p0 = [self.equilibrium_volume[0], self.free_energy[self.equilibrium_index,t], 8.0*cst.gpa_to_habo3,8.0]
-                popt, pcov= curve_fit(eos.murnaghan_EV, self.volume[:,0], self.free_energy[:,t], p0)
-#                cc = 2*popt[0]/(np.sqrt(3)*self.equilibrium_volume[1]**2)
-#                print('for T={}K, popt= {},c={}'.format(T,popt[0],cc-delta[1]))
+                # Fit volume, whithout splitting into a0 and c0
+                p0v = [self.equilibrium_volume[0], self.free_energy[self.equilibrium_index,t], 8.0*cst.gpa_to_habo3,8.0]
+                poptv, pcovv= curve_fit(eos.murnaghan_EV, self.volume[:,0], self.free_energy[:,t], p0v,bounds=bounds_vol)
+                print('volume fit = {}'.format(poptv[0]))
+
+                # Fit only the c variation
+#                varr = np.zeros((7))
+#                varr[0] = self.volume[0,0]
+#                varr[1:] = self.volume[7:,0]
+#                farr = np.zeros((7))
+#                farr[0] = self.free_energy[0,t]
+#                farr[1:] = self.free_energy[7:,t]
+                varr = np.zeros((10))
+                varr[0] = self.volume[0,0]
+                varr[1:] = self.volume[10:,0]
+                farr = np.zeros((10))
+                farr[0] = self.free_energy[0,t]
+                farr[1:] = self.free_energy[10:,t]
+
+                p0c = [self.equilibrium_volume[0], self.free_energy[self.equilibrium_index,t], 8.0*cst.gpa_to_habo3,8.0]
+                poptc, pcovc= curve_fit(eos.murnaghan_EV, varr, farr, p0c,bounds=bounds_c)
+
+                cc = 2*poptc[0]/(np.sqrt(3)*(self.equilibrium_volume[1]**2))
+                print('c data only,v = {}, c={}'.format(poptc[0],cc-delta[1]))
 #                print(self.free_energy[:,t])
 
-                arr[0].plot(self.volume[0,0],self.free_energy[0,t],marker='o',linestyle='None',color=mycmap(color_idx[t]))
-                arr[0].plot(self.volume[1:10,0],self.free_energy[1:10,t],marker='D',linestyle='None',color=mycmap(color_idx[t]))
-                arr[1].plot(self.volume[0,0],self.free_energy[0,t],marker='o',linestyle='None',color=mycmap(color_idx[t]))
-                arr[1].plot(self.volume[10:,0],self.free_energy[10:,t],marker='s',linestyle='None',color=mycmap(color_idx[t]))
+#                arr[0,0].plot(self.volume[1:7,0],self.free_energy[1:7,t],marker='D',linestyle='None',color=mycmap(color_idx[t]))
+                arr[0,0].plot(self.volume[1:10,0],self.free_energy[1:10,t],marker='D',linestyle='None',color=mycmap(color_idx[t]))
+                arr[0,0].plot(self.volume[0,0],self.free_energy[0,t],marker='o',linestyle='None',color=mycmap(color_idx[t]))
+                V0=np.sqrt(3)/2*aa**2*self.equilibrium_volume[3] 
+                arr[0,0].plot(V0, eos.murnaghan_EV(V0,popta[0],popta[1],popta[2],popta[3]),'kx')
+                #arr[0,1].plot(self.volume[0,0],self.free_energy[0,t],marker='o',linestyle='None',color=mycmap(color_idx[t]),mec='black')
+#                arr[0,1].plot(self.volume[7:,0],self.free_energy[7:,t],marker='s',linestyle='None',color=mycmap(color_idx[t]))
+                #arr[0,1].plot(self.volume[10:,0],self.free_energy[10:,t],marker='s',linestyle='None',color=mycmap(color_idx[t]))
+                V0=np.sqrt(3)/2*cc*self.equilibrium_volume[1]**2
+                arr[0,1].plot(V0, eos.murnaghan_EV(V0,poptc[0],poptc[1],poptc[2],poptc[3]),'kx')
 
-                
+                dummyx = np.linspace(0.99*np.amin(self.volume[:,0]),1.01*np.amax(self.volume[:,0]),100)
+                dummyy = eos.murnaghan_EV_axial(dummyx,popt[0],popt[1],popt[2],popt[3],popt[4])
+                dummyyv = eos.murnaghan_EV(dummyx,poptv[0],poptv[1],poptv[2],poptv[3])
+                dummyya = eos.murnaghan_EV(dummyx,popta[0],popta[1],popta[2],popta[3])
+                dummyyc = eos.murnaghan_EV(dummyx,poptc[0],poptc[1],poptc[2],poptc[3])
+
+
+#                arr[0,2].plot(self.volume[1:7,0],self.free_energy[1:7,t],marker='D',linestyle='None',color=mycmap(color_idx[t]))
+#                arr[0,2].plot(self.volume[7:,0],self.free_energy[7:,t],marker='s',linestyle='None',color=mycmap(color_idx[t]))
+                arr[0,2].plot(self.volume[1:10,0],self.free_energy[1:10,t],marker='D',linestyle='None',color=mycmap(color_idx[t]))
+                arr[0,2].plot(self.volume[10:,0],self.free_energy[10:,t],marker='s',linestyle='None',color=mycmap(color_idx[t]))
+                arr[0,2].plot(self.volume[0,0],self.free_energy[0,t],marker='o',linestyle='None',color=mycmap(color_idx[t]),markeredgecolor='black')
+
+                arr[0,0].plot(dummyx,dummyya,color=mycmap(color_idx[t]))
+                arr[0,1].plot(dummyx,dummyyc,color=mycmap(color_idx[t]))
+                arr[0,2].plot(dummyx,dummyy,color=mycmap(color_idx[t]))
+
+                #arr[0,0].plot(dummyx,dummyyv,color='black',linestyle='dashed')
+                #arr[0,1].plot(dummyx,dummyyv,color='black',linestyle='dashed')
+                arr[0,2].plot(dummyx,dummyyv,color='black',linestyle='dotted')
+
+
+                #plot acell(T)
+                arr[1,0].plot(T, aa-delta[0], 'or',linestyle='None')
+                arr[1,1].plot(T, cc-delta[1], 'ob',linestyle='None')
+                if t==0:
+                    arr[1,2].plot(T, popt[0], 'or',linestyle='None',label='a')
+                else: 
+                    arr[1,2].plot(T, popt[0], 'or',linestyle='None')
+
+                if t==0:
+                    ax.plot(T,popt[1],'ob',linestyle='None',label='c')
+                else:
+                    ax.plot(T,popt[1],'ob',linestyle='None')
+
 
 
 
                 fit[:,t] = popt[:2]
+
+            arr[0,0].set_title("a variation only")
+            arr[0,1].set_title("c variation only")
+            arr[0,2].set_title("a,c variation")
+            fig.suptitle("Murnaghan EOS")
+            arr[0,0].set_ylabel("Free energy (Ha)")
+            arr[0,0].set_xlabel("Volume (bohr^3)")
+            arr[0,2].set_xlabel("Volume (bohr^3)")
+            arr[0,1].set_xlabel("Volume (bohr^3)")
+            arr[1,0].set_ylabel("a (bohr)")
+            arr[1,1].set_ylabel("c (bohr)")
+            arr[1,2].set_ylabel("a (bohr)")
+            ax.set_ylabel("c (bohr)",color='blue')
+            arr[1,0].set_xlabel("Temperature (K)")
+            arr[1,1].set_xlabel("Temperature (K)")
+            arr[1,2].set_xlabel("Temperature (K)")
+            arr[1,2].legend(numpoints=1,loc=1)
+            ax.legend(numpoints=1,loc=2)
+
+            plt.savefig("Murnaghan_1p5gpa_full.png")
             plt.show()
 
             return fit
@@ -2557,6 +2654,8 @@ def compute(
     
                     equilibrium_index = equilibrium_index,
                     verbose = verbose,
+                    pressure = pressure,
+                    pressure_units = pressure_units,
         
                     **kwargs)
      

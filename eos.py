@@ -18,7 +18,7 @@ def murnaghan_PV(V, V0,K0,K0p):
 def murnaghan_EV_axial(V, a0,c0,E0,K0,K0p):
 
     b = sqrt(3)/2.
-    eos = E0 + K0*V/K0p*( (((b*a0**2*c0)/V)**K0p)/(K0p-1) + 1) - K0*(b*a0**2*c0)/(K0p-1)
+    eos = E0 + K0*(V)/K0p*( (((b*a0**2*c0)/(V))**K0p)/(K0p-1) + 1) - K0*(b*a0**2*c0)/(K0p-1)
 
     return eos 
 
