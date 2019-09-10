@@ -15,6 +15,7 @@ import matplotlib
 matplotlib.use('TKAgg')
 import matplotlib.pyplot as plt
 import constants as cst
+from scipy.optimize import least_squares
 
 
 from ElectronPhononCoupling import DdbFile
@@ -24,6 +25,7 @@ from gapfile import GapFile
 from elasticfile import ElasticFile
 #from zpr_plotter import EXPfile
 import eos as eos
+import lmfit as lmfit
 
 from matplotlib import rc
 #rc('text', usetex = True)
@@ -487,6 +489,7 @@ class GibbsFreeEnergy(FreeEnergy):
                 poptv, pcovv= curve_fit(eos.murnaghan_EV, self.volume[:,0], self.free_energy[:,t], p0v,bounds=bounds_vol)
                 print('volume fit = {}'.format(poptv[0]))
 
+
                 # Fit only the c variation
 #                varr = np.zeros((7))
 #                varr[0] = self.volume[0,0]
@@ -508,6 +511,30 @@ class GibbsFreeEnergy(FreeEnergy):
                 print('c data only,v = {}, c={}'.format(poptc[0],cc-delta[1]))
 #                print(self.free_energy[:,t])
 
+
+                # 2D fit with lmfit
+                # First, create my 2D mesh:
+                ac_mesh = np.meshgrid(self.volume[:,1],self.volume[:,3])
+ #               print(ac_mesh)
+                free_energy2D = self.free_energy[:,t]
+#                print(np.shape(free_energy2D))
+                lmfit_model = lmfit.Model(eos.murnaghan_EV_axial2D)
+
+                params = lmfit_model.make_params()
+                params['a0'].set(value=self.equilibrium_volume[1], vary=True,min=0.95*self.equilibrium_volume[1],max=1.05*self.equilibrium_volume[1])
+                params['c0'].set(value=self.equilibrium_volume[3], vary=True,min=0.95*self.equilibrium_volume[3],max=1.05*self.equilibrium_volume[3])
+                params['E0'].set(value=free_energy2D[self.equilibrium_index],vary=True,min=1.10*free_energy2D[self.equilibrium_index],max=0.95*free_energy2D[self.equilibrium_index])
+                params['K0'].set(value=8.0, vary=True,min=6.0,max=30.0)
+                params['K0p'].set(value=8.0, vary=True,min=2.0,max=12.0)
+
+                lmfit_result = lmfit_model.fit(free_energy2D,mesh=[self.volume[:,1],self.volume[:,3]],a0=params['a0'],c0=params['c0'],E0=params['E0'],K0=params['K0'],K0p=params['K0p'])
+                print(lmfit_result.fit_report())
+                print(lmfit_result.params.pretty_print())
+#                fitlsq, covlsq = least_squares(self.residuals,x0=[aa,cc,popta[1],popta[2],popta[3]], args=(self.volume[:,1],self.volume[:,3],self.free_energy[:,t]))
+#                print(fitlsq)
+
+
+                #### Plotting starts here
 #                arr[0,0].plot(self.volume[1:7,0],self.free_energy[1:7,t],marker='D',linestyle='None',color=mycmap(color_idx[t]))
                 arr[0,0].plot(self.volume[1:10,0],self.free_energy[1:10,t],marker='D',linestyle='None',color=mycmap(color_idx[t]))
                 arr[0,0].plot(self.volume[0,0],self.free_energy[0,t],marker='o',linestyle='None',color=mycmap(color_idx[t]))
@@ -581,6 +608,11 @@ class GibbsFreeEnergy(FreeEnergy):
             plt.show()
 
             return fit
+
+    def residuals(self,params,x,y,z):
+
+        V = np.sqrt(3)/2*x**2*y
+        return z - eos.murnaghan_EV_axial2(x,y,params[0],params[1],params[2],params[3],params[4])
 
     def write_acell(self):
 

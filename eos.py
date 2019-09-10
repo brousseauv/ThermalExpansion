@@ -1,6 +1,6 @@
 #! usr/bin/env python
 
-from numpy import sqrt
+from numpy import sqrt,ravel
 # Murnaghan equation of state
 
 def murnaghan_EV(V, V0,E0,K0,K0p):
@@ -21,6 +21,18 @@ def murnaghan_EV_axial(V, a0,c0,E0,K0,K0p):
     eos = E0 + K0*(V)/K0p*( (((b*a0**2*c0)/(V))**K0p)/(K0p-1) + 1) - K0*(b*a0**2*c0)/(K0p-1)
 
     return eos 
+
+def murnaghan_EV_axial2D(mesh, a0,c0,E0,K0,K0p):
+
+    #unpack 1D list into 2D a and c coordinates
+    a, c = mesh
+
+    b = sqrt(3)/2.
+    #Construct 2D EOS
+    eos = E0 + K0*(b*a**2*c)/K0p*( (((b*a0**2*c0)/(b*a**2*c))**K0p)/(K0p-1) + 1) - K0*(b*a0**2*c0)/(K0p-1)
+    # Flatten the 2D EOS to 1D
+    return eos #ravel(eos)?
+
 
 def birch_murnaghan_EV(V,V0,E0,K0,K0p):
 
