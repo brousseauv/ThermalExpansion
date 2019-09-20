@@ -46,3 +46,12 @@ def birch_murnaghan_EV_axial(V,a0,c0,E0,K0,K0p):
     eos = E0 + 9*(b*a0**2*c0)*K0/16*( (( (b*a0**2*c0/V)**(2./3) - 1)**3)*K0p + (( (b*a0**2*c0/V)**(2./3) -1)**2)*(6 - 4*(b*a0**2*c0/V)**(2./3)))
 
     return eos
+
+def birch_murnaghan_EV_axial2D(mesh,a0,c0,E0,K0,K0p):
+
+    a,c = mesh
+
+    b = sqrt(3)/2.
+    eos = E0 + 9*(b*a0**2*c0)*K0/16*( (( (b*a0**2*c0/(b*a**2*c))**(2./3) - 1)**3)*K0p + (( (b*a0**2*c0/(b*a**2*c))**(2./3) -1)**2)*(6 - 4*(b*a0**2*c0/(b*a**2*c))**(2./3)))
+
+    return eos
