@@ -367,7 +367,7 @@ class Gibbs_from_anaddb(FreeEnergy):
 #                afit = np.polyfit(self.volume[:,1],self.free_energy[:,t],2)
 #                fit[t] = -afit[1]/(2*afit[0])
                 p0 = [self.equilibrium_volume[0],self.free_energy[1,t],self.bulk_modulus,4.0]
-                popt, pcov = curve_fit(eos.murnaghan_EV, self.volume[:,0],self.free_enetgy[:,t],p0)
+                popt, pcov = curve_fit(eos.murnaghan_EV, self.volume[:,0],self.free_energy[:,t],p0)
                 fit[t] = (4*popt[0])**(1./3)
 
 #                if plot:
@@ -967,7 +967,7 @@ class GibbsFreeEnergy(FreeEnergy):
 
             # for each qpt:
             for i in range(nqpt):
-               # print('qpt{}'.format(i+1))
+                print('qpt{}'.format(i+1))
 
                 # open the ddb file
                 ddb = DdbFile(self.ddb_flists[v][i])
@@ -1059,7 +1059,8 @@ class GibbsFreeEnergy(FreeEnergy):
                 
             # Sum free energy = E + F_0 + F_T + PV
             self.free_energy[v,:] = (E+F_0)*np.ones((self.ntemp)) + F_T + self.pressure*self.volume[v,0]*np.ones((self.ntemp))
-            print(self.pressure)
+            if v==0:
+                print('Pressure is {} {}'.format(self.pressure,self.pressure_units))
 
         if self.check_anaddb:
             # Convert results in J/mol-cell, to compare with anaddb output
@@ -1082,6 +1083,11 @@ class GibbsFreeEnergy(FreeEnergy):
         for t,T in enumerate(self.temperature):
             print('for T = {}K, free energy:'.format(T))
             print(self.free_energy[:,t])
+            print('minimal value has index {}'.format(np.argmin(self.free_energy[:,t])))
+            sort = self.free_energy[:,t].argsort()
+            print('sorted order: {}'.format(sort))
+            print('delta min:{}'.format(self.free_energy[sort[1],t]-self.free_energy[sort[0],t]))
+
         self.temperature_dependent_acell = self.minimize_free_energy()
 #        self.gruneisen = self.get_gruneisen(nqpt,nmode,nvol)
 #        self.acell_via_gruneisen = self.get_acell(nqpt,nmode)
@@ -1091,10 +1097,14 @@ class GibbsFreeEnergy(FreeEnergy):
 
     def minimize_free_energy(self):
 
-        plot = False
+        plot = True
 
         if plot:
             import matplotlib.pyplot as plt
+            import matplotlib.cm as cm
+            mycmap = cm.jet
+            color_idx = np.linspace(0, 1, self.ntemp)
+
         
         if self.symmetry == 'cubic':
 
@@ -1103,18 +1113,24 @@ class GibbsFreeEnergy(FreeEnergy):
             for t, T in enumerate(self.temperature):
 #                afit = np.polyfit(self.volume[:,1],self.free_energy[:,t],2)
 #                fit[t] = -afit[1]/(2*afit[0])
-                p0 = [self.equilibrium_volume[0],self.free_energy[1,t],self.bulk_modulus,4.0]
-                popt, pcov = curve_fit(eos.murnaghan_EV, self.volume[:,0],self.free_enetgy[:,t],p0)
+                p0 = [self.equilibrium_volume[0],self.free_energy[self.equilibrium_index,t],self.bulk_modulus,4.0]
+                popt, pcov = curve_fit(eos.murnaghan_EV, self.volume[:,0],self.free_energy[:,t],p0)
                 fit[t] = (4*popt[0])**(1./3)
+                if T==0: 
+                    print(popt)
+                    print(popt[2]*cst.habo3_to_gpa)
+                    print(pcov)
 
-#                if plot:
-#                    xfit = np.linspace(9.50,12.0,100)
-#                    yfit = afit[0]*xfit**2 + afit[1]*xfit + afit[2]
-#                    plt.plot(self.volume[:,1],self.free_energy[:,t],marker='o')
-#                    plt.plot(xfit,yfit)
+                if plot:
+                    xfit = np.linspace(0.90*self.equilibrium_volume[1],1.10*self.equilibrium_volume[1],100)
+                    yfit = eos.murnaghan_EV(0.25*xfit**3,popt[0],popt[1],popt[2],popt[3])
+                    plt.plot(self.volume[:,1],self.free_energy[:,t],linestyle='None',marker='x',color=mycmap(color_idx[t]))
+                    plt.plot(xfit,yfit,color=mycmap(color_idx[t]))
+                    plt.plot(fit[t],popt[1],marker='o',linestyle='None',color=mycmap(color_idx[t]))
 
-#            if plot:
-#                plt.show()
+            if plot:
+                plt.savefig('Ge.png')
+                plt.show()
 
             fit = np.expand_dims(fit,axis=0)
             return fit
@@ -2023,6 +2039,7 @@ class Gruneisen(FreeEnergy):
 
             bmod = self.get_bulkmodulus_from_elastic(elastic.stiffness_relaxed)
             bmod2 = self.get_bulkmodulus_from_elastic(elastic.stiffness_clamped)
+            self.bulkmodulus_from_elastic = bmod
             print('Bulk modulus from elastic constants = {:>7.3f} GPa'.format(bmod))
             print('Bulk modulus from elastic constants (clamped) = {:>7.3f} GPa'.format(bmod2))
 
@@ -2205,11 +2222,11 @@ class Gruneisen(FreeEnergy):
 
     def get_gruneisen(self, nqpt, nmode,nvol):
 
-        plot = False
+        plot = True
 
         if plot :
             import matplotlib.pyplot as plt
-            fig,arr = plt.subplots(1,2,figsize = (12,6), sharey = False,squeeze=False)
+            fig,arr = plt.subplots(1,2,figsize = (8,6), sharey = False,squeeze=False)
 
         if self.symmetry == 'cubic':
             
@@ -2662,6 +2679,8 @@ class Gruneisen(FreeEnergy):
             alpha_c = ( 2*self.compliance[0,2]*np.einsum('q,qvt,qv->t',self.wtq,cv,self.gruneisen[0,:,:]) +
                 self.compliance[2,2]*np.einsum('q,qvt,qv->t',self.wtq,cv,self.gruneisen[1,:,:]))/self.equilibrium_volume[0]
 
+            self.alpha_a = alpha_a
+            self.alpha_c = alpha_c
             alpha_a2 = ( (self.compliance_rigid[0,0]+self.compliance_rigid[0,1])*np.einsum('q,qvt,qv->t',self.wtq,cv,self.gruneisen[0,:,:]) +
                 self.compliance_rigid[0,2]*np.einsum('q,qvt,qv->t',self.wtq,cv,self.gruneisen[1,:,:]))/self.equilibrium_volume[0]
             alpha_c2 = ( 2*self.compliance_rigid[0,2]*np.einsum('q,qvt,qv->t',self.wtq,cv,self.gruneisen[0,:,:]) +
@@ -2672,6 +2691,8 @@ class Gruneisen(FreeEnergy):
             alpha_cf = ( 2*self.compliance[0,2]*np.einsum('q,qvt,qv->t',self.wtq,cv,self.gru2[0,:,:]) +
                 self.compliance[2,2]*np.einsum('q,qvt,qv->t',self.wtq,cv,self.gru2[1,:,:]))/self.equilibrium_volume[0]
 
+
+            self.cv = np.einsum('q,qvt->t',self.wtq,cv)
 
             # Then, get a(T) and c(T)
             integral_a = np.einsum('q,qvt,qv->t',self.wtq,hwt,self.gruneisen[0,:,:])
@@ -2695,10 +2716,10 @@ class Gruneisen(FreeEnergy):
             cterm_plushalf = 2*self.compliance[0,2]*integral_aplushalf + self.compliance[2,2]*integral_cplushalf
             cplushalf = self.equilibrium_volume[3]*(cterm_plushalf/self.equilibrium_volume[0] + 1)
 
-            #daa_slope = np.polyfit(self.temperature[14:],daa[14:],1)
-            #print('Delta a/a intersect: {:>8.5e}, new a0 = {} bohr'.format(daa_slope[1],-daa_slope[1]*self.equilibrium_volume[1]+self.equilibrium_volume[1]))
-            #dcc_slope = np.polyfit(self.temperature[14:],dcc[14:],1)
-            #print('Delta c/c intersect: {:>8.5e}, new c0 = {} bohr'.format(dcc_slope[1],-dcc_slope[1]*self.equilibrium_volume[3]+self.equilibrium_volume[3]))
+            daa_slope = np.polyfit(self.temperature[16:],daa[16:],1)
+            print('Delta a/a intersect: {:>8.5e}, new a0 = {} bohr'.format(daa_slope[1],-daa_slope[1]*self.equilibrium_volume[1]+self.equilibrium_volume[1]))
+            dcc_slope = np.polyfit(self.temperature[16:],dcc[16:],1)
+            print('Delta c/c intersect: {:>8.5e}, new c0 = {} bohr'.format(dcc_slope[1],-dcc_slope[1]*self.equilibrium_volume[3]+self.equilibrium_volume[3]))
 
             a2 = (self.compliance_rigid[0,0]+self.compliance[0,1])*integral_a + self.compliance[0,2]*integral_c
             a2 = self.equilibrium_volume[1]*(a2/self.equilibrium_volume[0] + 1)
@@ -3138,6 +3159,7 @@ class Gruneisen(FreeEnergy):
 
             dts.createDimension('number_of_temperatures', self.ntemp)
             dts.createDimension('number_of_lattice_parameters', len(self.distinct_acell))
+            dts.createDimension('one',1)
 
             data = dts.createVariable('temperature','d', ('number_of_temperatures'))
             data[:] = self.temperature[:]
@@ -3159,6 +3181,22 @@ class Gruneisen(FreeEnergy):
             data = dts.createVariable('acell_from_gibbs','d',('number_of_lattice_parameters','number_of_temperatures'))
             data[:,:] = self.fitg[:,:]
             data.units = 'Bohr radius'
+
+            data = dts.createVariable('alpha_a','d', ('number_of_temperatures'))
+            data[:] = self.alpha_a[:]
+            data.units = 'K^-1'
+
+            data = dts.createVariable('alpha_c','d', ('number_of_temperatures'))
+            data[:] = self.alpha_c[:]
+            data.units = 'K^-1'
+
+            data = dts.createVariable('bulk_modulus_habo3','d',('one'))
+            data[:] = self.bulkmodulus_from_elastic*cst.gpa_to_habo3
+
+            data = dts.createVariable('specific_heat','d',('number_of_temperatures'))
+            data[:] = self.cv
+            data.units = 'Ha/K'
+
 
 
         # Then, write them in ascii file
@@ -3334,6 +3372,7 @@ class Static(object):
 
 
         self.bulk_modulus, self.bulk_modulus_derivative, self.equilibrium_volume, self.equilibrium_energy =  self.get_bulk_modulus()
+        self.effective_pressure = self.get_effective_pressure()
 
         if self.dedp:
     
@@ -3372,6 +3411,14 @@ class Static(object):
         print(popt[2]/cst.gpa_to_habo3)
         
         return popt[2], popt[3], popt[0], popt[1]
+
+
+    def get_effective_pressure(self):
+
+        #Extract effective pressure at a given volume from Murnaghan EOS
+        pdata = eos.murnaghan_PV(self.volume,self.equilibrium_volume, self.bulk_modulus, self.bulk_modulus_derivative)
+
+        return pdata
 
 
     def get_dedp(self):
@@ -3459,8 +3506,8 @@ class Static(object):
             data[:] = self.etotal
             data.units = 'hartree'
 
-            data = dts.createVariable('pressure','d',('number_of_points'))
-            data[:] = self.pressure*cst.habo3_to_gpa
+            data = dts.createVariable('effective_pressure_from_EOS','d',('number_of_points'))
+            data[:] = self.effective_pressure*cst.habo3_to_gpa
             data.units = 'GPa'
 
             data = dts.createVariable('volume','d',('number_of_points'))
@@ -3472,13 +3519,15 @@ class Static(object):
             data.units = 'hartree'
 
             data = dts.createVariable('dE_dP','d',('one'))
-            data[:] = self.dedp*cst.ha_to_ev*1000/cst.habo3_to_gpa
-            data.units = 'meV/GPa'
+            if self.dedp:
+                data[:] = self.dedp*cst.ha_to_ev*1000/cst.habo3_to_gpa
+                data.units = 'meV/GPa'
 
             data = dts.createVariable('dedp_fit','d',('two'))
-            self.dedp_fit[0] = self.dedp_fit[0]/cst.habo3_to_gpa
-            data[:] = self.dedp_fit
-            data.units = 'hartree/GPa, hartree'            
+            if self.dedp:
+                self.dedp_fit[0] = self.dedp_fit[0]/cst.habo3_to_gpa
+                data[:] = self.dedp_fit
+                data.units = 'hartree/GPa, hartree'            
 
 ############################################################
 # Also, split this into different files?
