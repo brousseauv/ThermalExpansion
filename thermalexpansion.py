@@ -12,7 +12,8 @@ import warnings
 import itertools as itt
 
 import matplotlib
-matplotlib.use('TKAgg')
+matplotlib.use('TKAgg') #for UdeM
+#matplotlib.use('Qt5Agg') # for home
 import matplotlib.pyplot as plt
 import constants as cst
 from scipy.optimize import least_squares,curve_fit
@@ -23,7 +24,7 @@ from outfile import OutFile
 from gsrfile import GsrFile
 from gapfile import GapFile
 from elasticfile import ElasticFile
-#from zpr_plotter import EXPfile
+from expfile import EXPfile
 import eos as eos
 import lmfit as lmfit
 
@@ -896,6 +897,8 @@ class GibbsFreeEnergy(FreeEnergy):
         self.temperature = temperature
         self.ntemp = len(self.temperature) 
 
+        if not bulk_modulus:
+            raise Exception('Must provide an estimate of the bulk modulus and specify its units, in GPa or Ha/bohr^3')
         if bulk_modulus is not None:
             if bulk_modulus_units == 'GPa':
                 self.bulk_modulus = bulk_modulus*cst.gpa_to_habo3
@@ -936,7 +939,7 @@ class GibbsFreeEnergy(FreeEnergy):
         # Loop on all volumes
         for v in range(nvol):
 
-            print('Reading data for volume {}'.format(v+1))
+            print('\n\nReading data from {}'.format(self.out_flists[v]))
            # Open OUTfile
             gs = OutFile(out_flists[v])
             self.volume[v,0] = gs.volume
@@ -967,7 +970,6 @@ class GibbsFreeEnergy(FreeEnergy):
 
             # for each qpt:
             for i in range(nqpt):
-                print('qpt{}'.format(i+1))
 
                 # open the ddb file
                 ddb = DdbFile(self.ddb_flists[v][i])
@@ -981,9 +983,11 @@ class GibbsFreeEnergy(FreeEnergy):
                 # diagonalize the dynamical matrix and get the eigenfrequencies
                 if is_gamma:
                     ddb.compute_dynmat(asr=True)
+                    print('Qpt is Gamma')
                 else:
                     ddb.compute_dynmat()
                         ##### CHECK WITH GABRIEL IF I SHOULD HAVE LOTO SPLITTING AT GAMMA (WHERE DOES HIS CODE TREAT THE ELECTRIC FIELD PERTURBAITON IN THE DDB AT GAMMA???)
+
 
                 # Store frequencies for Gruneisen parameters
                 self.omega[v,i,:] = ddb.omega
@@ -1129,7 +1133,7 @@ class GibbsFreeEnergy(FreeEnergy):
                     plt.plot(fit[t],popt[1],marker='o',linestyle='None',color=mycmap(color_idx[t]))
 
             if plot:
-                plt.savefig('Ge.png')
+                plt.savefig('cGaN.png')
                 plt.show()
 
             fit = np.expand_dims(fit,axis=0)
@@ -1141,22 +1145,26 @@ class GibbsFreeEnergy(FreeEnergy):
             # Only independent fit for now...
             fit = np.zeros((2,self.ntemp))
 
-            import matplotlib.pyplot as plt
-            import matplotlib.cm as cm
-            fig,arr = plt.subplots(2,3,sharey=False,figsize=(10,10))
-            ax = arr[1,2].twinx()
-            mycmap = cm.jet
-            color_idx = np.linspace(0, 1, self.ntemp)
-            print(self.equilibrium_volume)
+            plot = False
+
+            if plot:
+                import matplotlib.pyplot as plt
+                import matplotlib.cm as cm
+                fig,arr = plt.subplots(2,3,sharey=False,figsize=(10,10))
+                fig2, arr2 = plt.subplots(1,2, sharey=False,figsize=(10,10))
+                ax = arr[1,2].twinx()
+                mycmap = cm.jet
+                color_idx = np.linspace(0, 1, self.ntemp)
+                print('equilibrium volume',self.equilibrium_volume)
 
             from scipy.optimize import leastsq
 
 #            fit = np.zeros((2,self.ntemp))
 #            fit2d = np.zeros((2,self.ntemp))
             fitg = np.zeros((2,self.ntemp))
-            fit2dg = np.zeros((2,self.ntemp))
-            fit2d_cf = np.zeros((2,self.ntemp))
-            fit2d_par = np.zeros((2,self.ntemp))
+            fit2dg = np.zeros((2,self.ntemp))    # eos fit with least_sq
+            fit2d_cf = np.zeros((2,self.ntemp))  #eos fit with curve_fit
+            fit2d_par = np.zeros((2,self.ntemp)) #paraboloid fit
             fitind_par = np.zeros((2,self.ntemp))
 
 
@@ -1164,92 +1172,82 @@ class GibbsFreeEnergy(FreeEnergy):
 #                import matplotlib.pyplot as plt
 #                from mpl_toolkits.mplot3d import Axes3D
 
+            ##For BiTeI only. This should be put in a special branch
             # This delta is the difference between real HGH minimum and PAW minimum, at the current pressure
-            if self.pressure_gpa==0.0:
-                delta =  [0.011000356489930141,0.0844492602578999] #for 0gpa
-            if self.pressure_gpa == 0.5:
-                delta = [0.004513105799999195,0.0239153519999995] #for 0.5gpa
-            if self.pressure_gpa == 1.0:
-                delta = [0.0,0.0] #for 1gpa
-            if self.pressure_gpa == 1.5:
-                delta = [0.0031372478999998066,0.001351464000000746] #for 1.5gpa
-            if self.pressure_gpa == 3.0:
-                delta = [0.0,0.0] #for 3gpa
-            if self.pressure_gpa == 3.5:
-                delta = [0.001538456200000482,-0.0026159529999993936] #for 3.5gpa
-            if self.pressure_gpa == 5.0:
-                delta = [0.016926552700000208,-0.0055531139999995816] #for 5gpa
+#            if self.pressure_gpa==0.0:
+#                delta =  [0.011000356489930141,0.0844492602578999] #for 0gpa
+#            if self.pressure_gpa == 0.5:
+#                delta = [0.004513105799999195,0.0239153519999995] #for 0.5gpa
+#            if self.pressure_gpa == 1.0:
+#                delta = [0.0,0.0] #for 1gpa
+#            if self.pressure_gpa == 1.5:
+#                delta = [0.0031372478999998066,0.001351464000000746] #for 1.5gpa
+#            if self.pressure_gpa == 3.0:
+#                delta = [0.0,0.0] #for 3gpa
+#            if self.pressure_gpa == 3.5:
+#                delta = [0.001538456200000482,-0.0026159529999993936] #for 3.5gpa
+#            if self.pressure_gpa == 5.0:
+#                delta = [0.016926552700000208,-0.0055531139999995816] #for 5gpa
 
 
             for t,T in enumerate(self.temperature):
 
 
                 # define bounds for optimal parameters
-                bounds_axial = [[0.97*self.equilibrium_volume[1],0.97*self.equilibrium_volume[3],1.03*self.free_energy[self.equilibrium_index,t],0.,0.],
-                                [1.03*self.equilibrium_volume[1],1.03*self.equilibrium_volume[3],0.97*self.free_energy[self.equilibrium_index,t],100.,30.]]
-                bounds_vol = [[0.97*self.equilibrium_volume[0],1.03*self.free_energy[self.equilibrium_index,t],0.,0.],
-                                [1.03*self.equilibrium_volume[0],0.97*self.free_energy[self.equilibrium_index,t],100.,30.]]
+                bounds_axial = [[0.95*self.equilibrium_volume[1],0.95*self.equilibrium_volume[3],1.08*self.free_energy[self.equilibrium_index,t],0.,0.],
+                                [1.08*self.equilibrium_volume[1],1.08*self.equilibrium_volume[3],0.95*self.free_energy[self.equilibrium_index,t],300.,30.]]
+                bounds_vol = [[0.95*self.equilibrium_volume[0],1.08*self.free_energy[self.equilibrium_index,t],0.,0.],
+                                [1.08*self.equilibrium_volume[0],0.95*self.free_energy[self.equilibrium_index,t],300.,30.]]
                 va = np.sqrt(3)/2*self.equilibrium_volume[3]
                 vc = np.sqrt(3)/2*(self.equilibrium_volume[1]**2)
-                bounds_a = [[va*(0.97*self.equilibrium_volume[1])**2,1.03*self.free_energy[self.equilibrium_index,t],0.,0.],
-                                [va*(1.03*self.equilibrium_volume[1])**2,0.97*self.free_energy[self.equilibrium_index,t],100.,30.]]
-                bounds_c = [[0.97*vc*self.equilibrium_volume[3],1.03*self.free_energy[self.equilibrium_index,t],0.,0.],
-                                [1.03*vc*self.equilibrium_volume[3],0.97*self.free_energy[self.equilibrium_index,t],100.,30.]]
-                bounds_para = [[0.95*self.equilibrium_volume[1],0.,0.95*self.equilibrium_volume[3],0.,1.05*self.free_energy[self.equilibrium_index,t]],
-                                [1.05*self.equilibrium_volume[1],np.inf,1.05*self.equilibrium_volume[3],np.inf,0.95*self.free_energy[self.equilibrium_index,t]]]
+                bounds_a = [[va*(0.95*self.equilibrium_volume[1])**2,1.08*self.free_energy[self.equilibrium_index,t],0.,0.],
+                                [va*(1.08*self.equilibrium_volume[1])**2,0.95*self.free_energy[self.equilibrium_index,t],300.,30.]]
+                bounds_c = [[0.95*vc*self.equilibrium_volume[3],1.08*self.free_energy[self.equilibrium_index,t],0.,0.],
+                                [1.08*vc*self.equilibrium_volume[3],0.95*self.free_energy[self.equilibrium_index,t],300.,30.]]
+                bounds_para = [[0.95*self.equilibrium_volume[1],0.,0.95*self.equilibrium_volume[3],0.,1.08*self.free_energy[self.equilibrium_index,t]],
+                                [1.08*self.equilibrium_volume[1],np.inf,1.08*self.equilibrium_volume[3],np.inf,0.95*self.free_energy[self.equilibrium_index,t]]]
 
+                print('\n\n########## For T = {} K #####################\n'.format(T))
                 # First, treat a
                 # a0,c0, E0, B0, B0' 
                 '''or, B0=9.8GPa, B0'=7.6, B0prime has no units!!!'''
-                p0 = [self.equilibrium_volume[1],self.equilibrium_volume[3], self.free_energy[self.equilibrium_index,t],10.0*cst.gpa_to_habo3,8.0]
+                B0 = self.bulk_modulus #B0 is now mandatory, and already converted to Ha/bohr^3
+                B0p = 4.0
+                p0 = [self.equilibrium_volume[1],self.equilibrium_volume[3], self.free_energy[self.equilibrium_index,t],B0,B0p]
                 popt, pcov= curve_fit(eos.murnaghan_EV_axial, self.volume[:,0], self.free_energy[:,t], p0)
-                print('\nfor T={}K, a= {} c={}'.format(T,popt[0],popt[1]))
+                #print('  a= {} c={}'.format(popt[0],popt[1]))
 
-                delta = [0.0031372478999998066,0.001351464000000746]
+                #delta = [0.00313724789099998066,0.001351464000000746]
+                delta = [0.0,0.0]
                 # Fit only the a variation
-                p0a = [self.equilibrium_volume[0], self.free_energy[self.equilibrium_index,t], 10.0*cst.gpa_to_habo3,8.0]
-                popta, pcova= curve_fit(eos.murnaghan_EV, self.volume[:7,0], self.free_energy[:7,t], p0a,bounds=bounds_a)
-#                popta, pcova= curve_fit(eos.murnaghan_EV, self.volume[:10,0], self.free_energy[:10,t], p0a)
+                p0a = [self.equilibrium_volume[0], self.free_energy[self.equilibrium_index,t], B0*cst.gpa_to_habo3,B0p]
+                vol_a = np.concatenate((self.volume[:3,0],self.volume[5:6,0], self.volume[13:14,0], self.volume[17:18,0]),axis=0)
+                fe_a = np.concatenate((self.free_energy[:3,t],self.free_energy[5:6,t], self.free_energy[13:14,t], self.free_energy[17:18,t]),axis=0)
+
+                popta, pcova= curve_fit(eos.murnaghan_EV, vol_a, fe_a, p0a,bounds=bounds_a)
+#                popta, pcova= curve_
                 aa = np.sqrt(2*popta[0]/(np.sqrt(3)*self.equilibrium_volume[3]))
-                print('a data only:, v={}, a={}'.format(popta[0],aa-delta[0]))
-                print('uncertainty: {}'.format(2*np.sqrt(pcova[0,0])/np.sqrt(3)*(self.equilibrium_volume[3])))
+                #print('  a data only:, v={}, a={}'.format(popta[0],aa-delta[0]))
+                #print('  uncertainty: {}'.format(2*np.sqrt(pcova[0,0])/np.sqrt(3)*(self.equilibrium_volume[3])))
 
 
                 # Fit volume, whithout splitting into a0 and c0
-                p0v = [self.equilibrium_volume[0], self.free_energy[self.equilibrium_index,t], 10.0*cst.gpa_to_habo3,8.0]
+                p0v = [self.equilibrium_volume[0], self.free_energy[self.equilibrium_index,t], B0*cst.gpa_to_habo3,B0p]
                 poptv, pcovv= curve_fit(eos.murnaghan_EV, self.volume[:,0], self.free_energy[:,t], p0v,bounds=bounds_vol)
-                print('volume fit = {}'.format(poptv[0]))
-                print('K0={},k0p={}'.format(poptv[2]/cst.gpa_to_habo3,poptv[3]))
+                #print('  volume fit = {}'.format(poptv[0]))
+                #print('  K0={},k0p={}'.format(poptv[2]/cst.gpa_to_habo3,poptv[3]))
 
 
                 # Fit only the c variation
-#                varr = np.zeros((7))
-#                varr[0] = self.volume[0,0]
-#                varr[1:] = self.volume[7:,0]
-#                farr = np.zeros((7))
-#                farr[0] = self.free_energy[0,t]
-#                farr[1:] = self.free_energy[7:,t]
-#                varr = np.zeros((10))
-#                varr[0] = self.volume[0,0]
-#                varr[1:] = self.volume[10:,0]
+                vol_c = np.concatenate((self.volume[:1,0],self.volume[3:5,0],self.volume[21:,0]),axis=0)
+                fe_c = np.concatenate((self.free_energy[0:1,t],self.free_energy[3:5,t],self.free_energy[21:,t]),axis=0)
 
-#                farr = np.zeros((10))
-#                farr[0] = self.free_energy[0,t]
-#                farr[1:] = self.free_energy[10:,t]
-                varr = np.zeros((7))
-                varr[0] = self.volume[0,0]
-                varr[1:] = self.volume[7:13,0]
-                farr = np.zeros((7))
-                farr[0] = self.free_energy[0,t]
-                farr[1:] = self.free_energy[7:13,t]
-
-
-                p0c = [self.equilibrium_volume[0], self.free_energy[self.equilibrium_index,t], 10.0*cst.gpa_to_habo3,8.0]
-                poptc, pcovc= curve_fit(eos.murnaghan_EV, varr, farr, p0c,bounds=bounds_c)
+                p0c = [self.equilibrium_volume[0], self.free_energy[self.equilibrium_index,t], B0*cst.gpa_to_habo3,B0p]
+                poptc, pcovc= curve_fit(eos.murnaghan_EV, vol_c, fe_c, p0c,bounds=bounds_c)
 
                 cc = 2*poptc[0]/(np.sqrt(3)*(self.equilibrium_volume[1]**2))
-                print('c data only,v = {}, c={}'.format(poptc[0],cc-delta[1]))
-                print('uncertainty: {}'.format(2*np.sqrt(pcovc[0,0])/(np.sqrt(3))*(self.equilibrium_volume[1]**2)))
+                #print('  c data only,v = {}, c={}'.format(poptc[0],cc-delta[1]))
+                #print('  uncertainty: {}'.format(2*np.sqrt(pcovc[0,0])/(np.sqrt(3))*(self.equilibrium_volume[1]**2)))
 #                print(self.free_energy[:,t])
 
                 print('Minimizing free energy surface')
@@ -1271,16 +1269,14 @@ class GibbsFreeEnergy(FreeEnergy):
 #                print(fit2d[:,t])
 
                 # Fit Gibbs free energy
-                #afitg = np.polyfit(self.volume[:3,1],self.gibbs_free_energy[:3,t],2)
+                # Start 2d fit from 1D result...
                 afitg = aa
-                #fitg[0,t] = -afitg[1]/(2*afitg[0])
-                #cfitg = np.polyfit(self.volume[3:,3],self.gibbs_free_energy[3:,t],2)
                 cfitg = cc
-                #fitg[1,t] = -cfitg[1]/(2*cfitg[0])
+                #.. or, start from bare result???
 
-                K0,K0p = 10.0*cst.gpa_to_habo3, 8.0
-#                if t==0:
-                # ystart from equilibrium values
+                K0,K0p = self.bulk_modulus, 4.0
+
+                # start from equilibrium values
                 fit2g = least_squares(self.residuals, x0=[self.equilibrium_volume[1],self.equilibrium_volume[3],self.free_energy[self.equilibrium_index,t],K0,K0p], bounds=bounds_axial,args=(self.volume[:,1],self.volume[:,3],self.free_energy[:,t]))
                 fitcf,cfopt = curve_fit(eos.murnaghan_EV_axial2D,[self.volume[:,1],self.volume[:,3]], self.free_energy[:,t], p0=[afitg,cfitg,self.free_energy[self.equilibrium_index,t],K0,K0p],bounds=bounds_axial)
                 # start from independent solution
@@ -1300,51 +1296,53 @@ class GibbsFreeEnergy(FreeEnergy):
 #                            bounds=bounds_para)
 
                 # quadratic fit for a and c
-                myarrv = np.zeros((5))
-                myarrv[0] = self.volume[0,3]
-                myarrv[1:] = self.volume[5:9,3]
-                myarrf = np.zeros((5))
-                myarrf[0] = self.free_energy[0,t]
-                myarrf[1:] = self.free_energy[5:9,t]
+#                myarrv = np.zeros((5))
+#                myarrv[0] = self.volume[0,3]
+#                myarrv[1:] = self.volume[5:9,3]
+#                myarrf = np.zeros((5))
+#                myarrf[0] = self.free_energy[0,t]
+#                myarrf[1:] = self.free_energy[5:9,t]
 
                 if t==0:
-                    fitaq, fitacov= curve_fit(self.quadratic, self.volume[:5,1],self.free_energy[:5,t])
-                    fitcq, fitccov= curve_fit(self.quadratic, myarrv,myarrf)
+                    fitaq, fitacov= curve_fit(self.quadratic, vol_a, fe_a)
+                    fitcq, fitccov= curve_fit(self.quadratic, vol_c, fe_c)
                 else:
                     fitaq, fitacov= curve_fit(self.quadratic, self.volume[:5,1],self.free_energy[:5,t],p0=fitaq)
-                    fitcq, fitccov= curve_fit(self.quadratic,myarrv,myarrf,p0=fitcq)
+                    fitcq, fitccov= curve_fit(self.quadratic,vol_c,fe_c,p0=fitcq)
 
                 fitind_par[:,t] = -fitaq[1]/(2*fitaq[0]), -fitcq[1]/(2*fitcq[0])
                 
                 # print different fit results and uncertainty
-                print('with least_squares')
-                print('a={}, c={},K0={},K0p={}'.format(fit2g.x[0],fit2g.x[1],fit2g.x[3]*cst.habo3_to_gpa,fit2g.x[4]))
-                print('cost function: {}'.format(fit2g.cost))
+                #print('\nwith least_squares')
+                #print('a={}, c={},K0={},K0p={}'.format(fit2g.x[0],fit2g.x[1],fit2g.x[3]*cst.habo3_to_gpa,fit2g.x[4]))
+                #print('cost function: {}'.format(fit2g.cost))
+                #print('jacobian: {}'.format(fit2g.jac))
+                #print('status; {}'.format(fit2g.status))
                 fit2dg[:,t] = fit2g.x[:2]
 #                print('Gibbs')
             #    print(fitg[:,t]-delta)
             #    print(fit2dg[:,t]-delta)
                 #fitg[:,t] = fitg[:,t]-delta
                 fit2dg[:,t] = fit2dg[:,t]-delta
-                print('with curve_fit')
+                #print('\nwith curve_fit EOS')
 #                print(cfopt)
-                print('a={}, c={},K0={},K0p={}'.format(fitcf[0],fitcf[1],fitcf[3]*cst.habo3_to_gpa,fitcf[4]))
+                #print('a={}, c={},K0={},K0p={}'.format(fitcf[0],fitcf[1],fitcf[3]*cst.habo3_to_gpa,fitcf[4]))
                 fit2d_cf[:,t] = fitcf[0],fitcf[1]
 
-                print('Uncertainties:')
-                for i in range(len(fitcf)):
-                    print('{}'.format(np.sqrt(cfopt[i, i])))
+                #print('Uncertainties:')
+                #for i in range(len(fitcf)):
+                #    print('{}'.format(np.sqrt(cfopt[i, i])))
 
-                print('with paraboloid')
+                print('\nwith curve_fit paraboloid')
                 print('a={}, c={}'.format(fitpar[0],fitpar[2]))
                 print('Uncertainties: {} {}'.format(np.sqrt(covpar[0,0]),np.sqrt(covpar[2,2])))
                 fit2d_par[:,t] = fitpar[0],fitpar[2]
                 print(covpar)
 #                print(self.gibbs_free_energy[:,t])
                 
-                print('independent fit: a={},c={}'.format(fitind_par[0,t],fitind_par[1,t]))
-                print(fitacov)
-                print(fitccov)
+                #print('independent fit: a={},c={}'.format(fitind_par[0,t],fitind_par[1,t]))
+                #print(fitacov)
+                #print(fitccov)
 ############### stopped copying here
 
 #                if plot:
@@ -1374,113 +1372,229 @@ class GibbsFreeEnergy(FreeEnergy):
 #            self.fit2dg = fit2dg
 
 
-#                # 2D fit with lmfit
-#                # First, create my 2D mesh:
-#                ac_mesh = np.meshgrid(self.volume[:,1],self.volume[:,3])
-# #               print(ac_mesh)
-#                free_energy2D = self.free_energy[:,t]
-##                print(np.shape(free_energy2D))
-##                lmfit_model = lmfit.Model(eos.murnaghan_EV_axial2D)
+                # 2D fit with lmfit
+                # First, create my 2D mesh:
+                ac_mesh = np.meshgrid(self.volume[:,1],self.volume[:,3])
+ #               print(ac_mesh)
+                free_energy2D = self.free_energy[:,t]
+#                print(np.shape(free_energy2D))
+                lmfit_model = lmfit.Model(eos.murnaghan_EV_axial2D)
 #                lmfit_model = lmfit.Model(eos.birch_murnaghan_EV_axial2D)
-#
-#                params = lmfit_model.make_params()
-#                params['a0'].set(value=self.equilibrium_volume[1], vary=True,min=0.95*self.equilibrium_volume[1],max=1.05*self.equilibrium_volume[1])
-#                params['c0'].set(value=self.equilibrium_volume[3], vary=True,min=0.95*self.equilibrium_volume[3],max=1.05*self.equilibrium_volume[3])
-#                params['E0'].set(value=free_energy2D[self.equilibrium_index],vary=True,min=1.10*free_energy2D[self.equilibrium_index],max=0.95*free_energy2D[self.equilibrium_index])
-#                params['K0'].set(value=8.7, vary=True,min=6.0,max=30.0)
-#                params['K0p'].set(value=8.9, vary=True,min=2.0,max=12.0)
-#
-#                lmfit_result = lmfit_model.fit(free_energy2D,mesh=[self.volume[:,1],self.volume[:,3]],a0=params['a0'],c0=params['c0'],E0=params['E0'],K0=params['K0'],K0p=params['K0p'])
-#                print(lmfit_result.fit_report())
-#                print(lmfit_result.params.pretty_print())
-##                fitlsq, covlsq = least_squares(self.residuals,x0=[aa,cc,popta[1],popta[2],popta[3]], args=(self.volume[:,1],self.volume[:,3],self.free_energy[:,t]))
+
+                params = lmfit_model.make_params()
+                params['a0'].set(value=self.equilibrium_volume[1], vary=True,min=0.95*self.equilibrium_volume[1],max=1.08*self.equilibrium_volume[1])
+                params['c0'].set(value=self.equilibrium_volume[3], vary=True,min=0.95*self.equilibrium_volume[3],max=1.08*self.equilibrium_volume[3])
+                params['E0'].set(value=free_energy2D[self.equilibrium_index],vary=True,min=1.10*free_energy2D[self.equilibrium_index],max=0.95*free_energy2D[self.equilibrium_index])
+                params['K0'].set(value=self.bulk_modulus, vary=True,min=0.1*self.bulk_modulus,max=2*self.bulk_modulus)
+                params['K0p'].set(value=4.0, vary=True,min=2.0,max=30.0)
+
+                lmfit_result = lmfit_model.fit(free_energy2D,mesh=[self.volume[:,1],self.volume[:,3]],a0=params['a0'],c0=params['c0'],E0=params['E0'],K0=params['K0'],K0p=params['K0p'])
+                #print(lmfit_result.fit_report())
+                #print(lmfit_result.params.pretty_print())
+                #print(lmfit_result.params['a0'].value)
+#                fitlsq, covlsq = least_squares(self.residuals,x0=[aa,cc,popta[1],popta[2],popta[3]], args=(self.volume[:,1],self.volume[:,3],self.free_energy[:,t]))
 ##                print(fitlsq)
 
+                ####################################
+                # 2D fit with lmfit, paraboloid function
+                # First, create my 2D mesh:
+                ac_mesh = np.meshgrid(self.volume[:,1],self.volume[:,3])
+ #               print(ac_mesh)
+                free_energy2D = self.free_energy[:,t]
+#                print(np.shape(free_energy2D))
+                lmfit_model_para = lmfit.Model(eos.paraboloid_2D)
+#                lmfit_model = lmfit.Model(eos.birch_murnaghan_EV_axial2D)
 
-                #### Plotting starts here
-                arr[0,0].plot(self.volume[1:7,0],self.free_energy[1:7,t],marker='D',linestyle='None',color=mycmap(color_idx[t]))
-#                arr[0,0].plot(self.volume[1:10,0],self.free_energy[1:10,t],marker='D',linestyle='None',color=mycmap(color_idx[t]))
-                arr[0,0].plot(self.volume[0,0],self.free_energy[0,t],marker='o',linestyle='None',color=mycmap(color_idx[t]))
-                V0=np.sqrt(3)/2*aa**2*self.equilibrium_volume[3] 
-                arr[0,0].plot(V0, eos.murnaghan_EV(V0,popta[0],popta[1],popta[2],popta[3]),'kx')
-                arr[0,1].plot(self.volume[0,0],self.free_energy[0,t],marker='o',linestyle='None',color=mycmap(color_idx[t]),mec='black')
-                arr[0,1].plot(self.volume[7:,0],self.free_energy[7:,t],marker='s',linestyle='None',color=mycmap(color_idx[t]))
-                #arr[0,1].plot(self.volume[10:,0],self.free_energy[10:,t],marker='s',linestyle='None',color=mycmap(color_idx[t]))
-                V0=np.sqrt(3)/2*cc*self.equilibrium_volume[1]**2
-                arr[0,1].plot(V0, eos.murnaghan_EV(V0,poptc[0],poptc[1],poptc[2],poptc[3]),'kx')
+                params_para = lmfit_model_para.make_params()
+                params_para['a0'].set(value=self.equilibrium_volume[1], vary=True,min=0.95*self.equilibrium_volume[1],max=1.08*self.equilibrium_volume[1])
+                params_para['c0'].set(value=self.equilibrium_volume[3], vary=True,min=0.95*self.equilibrium_volume[3],max=1.08*self.equilibrium_volume[3])
+                params_para['A'].set(value=1.,vary=True,min=0.)
+                params_para['C'].set(value=1.,vary=True,min=0.)
+                params_para['B'].set(value=free_energy2D[self.equilibrium_index],vary=True,min=1.10*free_energy2D[self.equilibrium_index],max=0.95*free_energy2D[self.equilibrium_index])
+                #print(params_para.values())
+                lmfit_result_para=lmfit_model_para.fit(free_energy2D,mesh=[self.volume[:,1],self.volume[:,3]],a0=params_para['a0'],A=params_para['A'],c0=params_para['c0'],C=params_para['C'],B=params_para['B'])
+                print(lmfit_result_para.fit_report())
+                #print(lmfit_result_para.params.pretty_print())
+#
+                fit[0,t] = lmfit_result_para.params['a0'].value
+                fit[1,t] = lmfit_result_para.params['c0'].value
+                ### Plotting ####
+                ###################################################
+                if plot:
+                    #### Plotting starts here
+                    #[0,0] ; plot volume fit, a only
+                    arr[0,0].plot(vol_a,fe_a,marker='D',linestyle='None',color=mycmap(color_idx[t]))
+                    arr[0,0].plot(self.volume[0,0],self.free_energy[0,t],marker='o',linestyle='None',color=mycmap(color_idx[t]))
+                    V0=np.sqrt(3)/2*aa**2*self.equilibrium_volume[3] 
+                    arr[0,0].plot(V0, eos.murnaghan_EV(V0,popta[0],popta[1],popta[2],popta[3]),'kx')
 
-                dummyx = np.linspace(0.99*np.amin(self.volume[:,0]),1.01*np.amax(self.volume[:,0]),100)
-                dummyy = eos.murnaghan_EV_axial(dummyx,popt[0],popt[1],popt[2],popt[3],popt[4])
-                dummyyv = eos.murnaghan_EV(dummyx,poptv[0],poptv[1],poptv[2],poptv[3])
-                dummyya = eos.murnaghan_EV(dummyx,popta[0],popta[1],popta[2],popta[3])
-                dummyyc = eos.murnaghan_EV(dummyx,poptc[0],poptc[1],poptc[2],poptc[3])
+                    #[0,1]: plot volume fit, c only
+                    arr[0,1].plot(self.volume[0,0],self.free_energy[0,t],marker='o',linestyle='None',color=mycmap(color_idx[t]),mec='black')
+                    arr[0,1].plot(vol_c,fe_c,marker='s',linestyle='None',color=mycmap(color_idx[t]))
+                    #arr[0,1].plot(self.volume[10:,0],self.free_energy[10:,t],marker='s',linestyle='None',color=mycmap(color_idx[t]))
+                    V0=np.sqrt(3)/2*cc*self.equilibrium_volume[1]**2
+                    arr[0,1].plot(V0, eos.murnaghan_EV(V0,poptc[0],poptc[1],poptc[2],poptc[3]),'kx')
 
-
-                arr[0,2].plot(self.volume[1:7,0],self.free_energy[1:7,t],marker='D',linestyle='None',color=mycmap(color_idx[t]))
-                arr[0,2].plot(self.volume[7:,0],self.free_energy[7:,t],marker='s',linestyle='None',color=mycmap(color_idx[t]))
-#                arr[0,2].plot(self.volume[1:10,0],self.free_energy[1:10,t],marker='D',linestyle='None',color=mycmap(color_idx[t]))
-#                arr[0,2].plot(self.volume[10:,0],self.free_energy[10:,t],marker='s',linestyle='None',color=mycmap(color_idx[t]))
-                arr[0,2].plot(self.volume[0,0],self.free_energy[0,t],marker='o',linestyle='None',color=mycmap(color_idx[t]),markeredgecolor='black')
-
-                arr[0,0].plot(dummyx,dummyya,color=mycmap(color_idx[t]))
-                arr[0,1].plot(dummyx,dummyyc,color=mycmap(color_idx[t]))
-                arr[0,2].plot(dummyx,dummyy,color=mycmap(color_idx[t]))
-
-                #arr[0,0].plot(dummyx,dummyyv,color='black',linestyle='dashed')
-                #arr[0,1].plot(dummyx,dummyyv,color='black',linestyle='dashed')
-                arr[0,2].plot(dummyx,dummyyv,color='black',linestyle='dotted')
-
-
-                #plot acell(T)
-                arr[1,0].plot(T, aa-delta[0], 'or',linestyle='None',label='indep eos')
-                arr[1,1].plot(T, cc-delta[1], 'ob',linestyle='None')
-                if t==0:
-                    arr[1,2].plot(T, popt[0], 'or',linestyle='None',label='a')
-                else: 
-                    arr[1,2].plot(T, popt[0], 'or',linestyle='None')
-
-                if t==0:
-                    ax.plot(T,popt[1],'ob',linestyle='None',label='c')
-                else:
-                    ax.plot(T,popt[1],'ob',linestyle='None')
-
-                arr[1,0].plot(T,fit2dg[0,t],'xr',linestyle='None',label='least_squares eos')
-                arr[1,1].plot(T,fit2dg[1,t],'xb',linestyle='None')
-
-                arr[1,0].plot(T,fit2d_cf[0,t],'sr',linestyle='None',label='curve_fit eos')
-                arr[1,1].plot(T,fit2d_cf[1,t],'sb',linestyle='None')
-
-                arr[1,0].plot(T,fit2d_par[0,t],'*r',linestyle='None',label='paraboloid')
-                arr[1,1].plot(T,fit2d_par[1,t],'*b',linestyle='None')
-
-                arr[1,0].plot(T,fitind_par[0,t],'*g',linestyle='None',label='quadr indep')
-                arr[1,1].plot(T,fitind_par[1,t],'*c',linestyle='None')
+                    dummyx = np.linspace(0.99*np.amin(self.volume[:,0]),1.01*np.amax(self.volume[:,0]),100)
+                    dummyy = eos.murnaghan_EV_axial(dummyx,popt[0],popt[1],popt[2],popt[3],popt[4])
+                    dummyyv = eos.murnaghan_EV(dummyx,poptv[0],poptv[1],poptv[2],poptv[3])
+                    dummyya = eos.murnaghan_EV(dummyx,popta[0],popta[1],popta[2],popta[3])
+                    dummyyc = eos.murnaghan_EV(dummyx,poptc[0],poptc[1],poptc[2],poptc[3])
 
 
+                    #arr[0,2].plot(self.volume[1:7,0],self.free_energy[1:7,t],marker='D',linestyle='None',color=mycmap(color_idx[t]))
+                    #arr[0,2].plot(self.volume[7:,0],self.free_energy[7:,t],marker='s',linestyle='None',color=mycmap(color_idx[t]))
+    #                arr[0,2].plot(self.volume[1:10,0],self.free_energy[1:10,t],marker='D',linestyle='None',color=mycmap(color_idx[t]))
+    #                arr[0,2].plot(self.volume[10:,0],self.free_energy[10:,t],marker='s',linestyle='None',color=mycmap(color_idx[t]))
 
-                fit[:,t] = aa-delta[0], cc-delta[1]
 
-            arr[0,0].set_title("a variation only")
-            arr[0,1].set_title("c variation only")
-            arr[0,2].set_title("a,c variation")
-            fig.suptitle("Murnaghan EOS")
-            arr[0,0].set_ylabel("Free energy (Ha)")
-            arr[0,0].set_xlabel("Volume (bohr^3)")
-            arr[0,2].set_xlabel("Volume (bohr^3)")
-            arr[0,1].set_xlabel("Volume (bohr^3)")
-            arr[1,0].set_ylabel("a (bohr)")
-            arr[1,1].set_ylabel("c (bohr)")
-            arr[1,2].set_ylabel("a (bohr)")
-            ax.set_ylabel("c (bohr)",color='blue')
-            arr[1,0].set_xlabel("Temperature (K)")
-            arr[1,1].set_xlabel("Temperature (K)")
-            arr[1,2].set_xlabel("Temperature (K)")
-            arr[1,2].legend(numpoints=1,loc=1)
-            ax.legend(numpoints=1,loc=2)
-#            arr[1,0].legend(numpoints=1)
+                    #[0,2]: plot 2D_EV, volume fit with (a0,c0) as parameters)
+                    arr[0,2].plot(self.volume[:,0],self.free_energy[:,t],marker='D',linestyle='None',color=mycmap(color_idx[t]))
+                    arr[0,2].plot(self.volume[0,0],self.free_energy[0,t],marker='o',linestyle='None',color=mycmap(color_idx[t]),markeredgecolor='black')
 
-            plt.savefig("Murnaghan_1p5gpa_full.png")
-            plt.show()
+                    arr[0,0].plot(dummyx,dummyya,color=mycmap(color_idx[t]))
+                    arr[0,1].plot(dummyx,dummyyc,color=mycmap(color_idx[t]))
+                    arr[0,2].plot(dummyx,dummyy,color=mycmap(color_idx[t]))
+
+                    #arr[0,0].plot(dummyx,dummyyv,color='black',linestyle='dashed')
+                    #arr[0,1].plot(dummyx,dummyyv,color='black',linestyle='dashed')
+                    arr[0,2].plot(dummyx,dummyyv,color='black',linestyle='dotted')
+
+                    
+                    #[0,3]: volume vs 2D fit
+                    #arr[0,3].plot(self.volume[:,0],self.free_energy[:,t],marker='D',linestyle='None',color=mycmap(color_idx[t]))
+                    #arr[0,3].plot(self.volume[0,0],self.free_energy[0,t],marker='o',linestyle='None',color=mycmap(color_idx[t]),markeredgecolor='black')
+                    #dummylsq = eos.murnaghan_EV_axial2D([self.volume[:,1],self.volume[:,3]],fit2g.x[0], fit2g.x[1],fit2g.x[2],fit2g.x[3],fit2g.x[4])
+                    #dummycf = eos.murnaghan_EV_axial2D([self.volume[:,1],self.volume[:,3]],fitcf[0], fitcf[1],fitcf[2],fitcf[3],fitcf[4])
+                    #dummypara = self.paraboloid([self.volume[:,1],self.volume[:,3]],fitpar[0], fitpar[1],fitpar[2],fitpar[3],fitpar[4])
+
+                    #arr[0,3].plot(self.volume[:,0],dummylsq,linestyle='dashed',color='k')
+                    #arr[0,3].plot(self.volume[:,0],dummycf,linestyle='dotted',color='k')
+                    #arr[0,3].plot(self.volume[:,0],dummypara,linestyle='solid',color='k')
+
+                    #plot acell(T)
+                    arr[1,0].plot(T, aa-delta[0], 'or',linestyle='None',label='indep eos')
+                    arr[1,1].plot(T, cc-delta[1], 'ob',linestyle='None')
+    #                if t==0:
+    #                    arr[1,2].plot(T, popt[0], 'or',linestyle='None',label='a')
+    #                else: 
+    #                    arr[1,2].plot(T, popt[0], 'or',linestyle='None')
+
+    #                if t==0:
+    #                    ax.plot(T,popt[1],'ob',linestyle='None',label='c')
+    #                else:
+    #                    ax.plot(T,popt[1],'ob',linestyle='None')
+
+                    arr[1,0].plot(T,fit2dg[0,t],'xr',linestyle='None',label='lsq eos')
+                    arr[1,1].plot(T,fit2dg[1,t],'xb',linestyle='None')
+
+                    arr[1,0].plot(T,fit2d_cf[0,t],'sr',linestyle='None',label='cf eos')
+                    arr[1,1].plot(T,fit2d_cf[1,t],'sb',linestyle='None')
+
+                    arr[1,0].plot(T,fit2d_par[0,t],'*r',linestyle='None',label='cf paraboloid ')
+                    arr[1,1].plot(T,fit2d_par[1,t],'*b',linestyle='None')
+
+                    #arr[1,0].plot(T,fitind_par[0,t],'*g',linestyle='None',label='quadr indep')
+                    #arr[1,1].plot(T,fitind_par[1,t],'*c',linestyle='None')
+
+                    #arr[1,2].plot(T,lmfit_result.params['a0'].value,linestyle='None',marker='D',color='r',label='lmfit-eos')
+                    arr[1,2].plot(T,lmfit_result_para.params['a0'].value,linestyle='None',marker='D',color='m',label='lmfit-para')
+
+                    #ax.plot(T,lmfit_result.params['c0'].value,linestyle='None',marker='D',color='b',label='lmfit-eos')
+                    ax.plot(T,lmfit_result_para.params['c0'].value,linestyle='None',marker='D',color='c',label='lmfit-para')
+
+                    arr[1,2].plot(T,fit2d_par[0,t],'*r',linestyle='None',label='cf paraboloid ')
+                    ax.plot(T,fit2d_par[1,t],'*b',linestyle='None')
+
+
+                    
+                    if t==0:
+                        shift_a_lmfit = (lmfit_result_para.params['a0'].value*cst.bohr_to_ang-3.18932)
+                        shift_a_cf = (fit2d_par[0,t]*cst.bohr_to_ang-3.18932)
+                        shift_c_lmfit = (lmfit_result_para.params['c0'].value*cst.bohr_to_ang-5.18549)
+                        shift_c_cf = (fit2d_par[1,t]*cst.bohr_to_ang-5.18549)
+
+                        arr2[0].plot(T,lmfit_result_para.params['a0'].value*cst.bohr_to_ang-shift_a_lmfit,linestyle='None',marker='D',color='m',label='lmfit-para',markersize=10)
+                        arr2[1].plot(T,lmfit_result_para.params['c0'].value*cst.bohr_to_ang-shift_c_lmfit,linestyle='None',marker='D',color='c',label='lmfit-para',markersize=10)
+                        arr2[0].plot(T, fit2d_par[0,t]*cst.bohr_to_ang-shift_a_cf,'*r',linestyle='None',label='cf para ',markersize=10)
+                        arr2[1].plot(T,fit2d_par[1,t]*cst.bohr_to_ang-shift_c_cf,'*b',linestyle='None',label='cf para',markersize=10)
+
+                    else:
+                        arr2[0].plot(T,lmfit_result_para.params['a0'].value*cst.bohr_to_ang-shift_a_lmfit,linestyle='None',marker='D',color='m',markersize=10)
+                        arr2[1].plot(T,lmfit_result_para.params['c0'].value*cst.bohr_to_ang-shift_c_lmfit,linestyle='None',marker='D',color='c',markersize=10)
+                        arr2[0].plot(T, fit2d_par[0,t]*cst.bohr_to_ang-shift_a_cf,'*r',linestyle='None',markersize=10)
+                        arr2[1].plot(T,fit2d_par[1,t]*cst.bohr_to_ang-shift_c_cf,'*b',linestyle='None',markersize=10)
+
+                    fit[:,t] = aa-delta[0], cc-delta[1]
+
+    #
+                    # Reeber 1999 data
+                    reeber_a = EXPfile('experimental_data/GaN_aT_Reeber1999.nc')
+                    reeber_a.read_nc()
+                    reeber_c = EXPfile('experimental_data/GaN_cT_Reeber1999.nc')
+                    reeber_c.read_nc()
+
+                    arr2[0].plot(reeber_a.xaxis, reeber_a.yaxis,'xr',label='Reeber1999')
+                    arr2[1].plot(reeber_c.xaxis, reeber_c.yaxis,'xb',label='Reeber1999')
+
+                    roder_a = EXPfile('experimental_data/GaN_aT_Roder2005.nc')
+                    roder_a.read_nc()
+                    roder_a1 = EXPfile('experimental_data/GaN_aT_Roder2005_ref1.nc')
+                    roder_a1.read_nc()
+                    roder_a4 = EXPfile('experimental_data/GaN_aT_Roder2005_ref4.nc')
+                    roder_a4.read_nc()
+                    roder_a6 = EXPfile('experimental_data/GaN_aT_Roder2005_ref6.nc')
+                    roder_a6.read_nc()
+                    roder_c = EXPfile('experimental_data/GaN_cT_Roder2005.nc')
+                    roder_c.read_nc()
+                    roder_c1 = EXPfile('experimental_data/GaN_cT_Roder2005_ref1.nc')
+                    roder_c1.read_nc()
+                    roder_c4 = EXPfile('experimental_data/GaN_cT_Roder2005_ref4.nc')
+                    roder_c4.read_nc()
+                    roder_c6 = EXPfile('experimental_data/GaN_cT_Roder2005_ref6.nc')
+                    roder_c6.read_nc()
+
+                    arr2[0].plot(roder_a.xaxis, roder_a.yaxis,'vk',label='Roder2005')
+                    arr2[1].plot(roder_c.xaxis, roder_c.yaxis,'vk',label='Roder2005')
+                    arr2[0].plot(roder_a1.xaxis, roder_a1.yaxis,'Pk',label='Roder2005-ref1')
+                    arr2[1].plot(roder_c1.xaxis, roder_c1.yaxis,'Pk',label='Roder2005-ref1')
+                    arr2[0].plot(roder_a4.xaxis, roder_a4.yaxis,'sk',label='Roder2005-ref4')
+                    arr2[1].plot(roder_c4.xaxis, roder_c4.yaxis,'sk',label='Roder2005-ref4')
+                    arr2[0].plot(roder_a6.xaxis, roder_a6.yaxis,'*k',label='Roder2005-ref6')
+                    arr2[1].plot(roder_c6.xaxis, roder_c6.yaxis,'*k',label='Roder2005-ref6')
+
+
+                    arr[0,0].set_title("a variation only")
+                    arr[0,1].set_title("c variation only")
+                    arr[0,2].set_title("a,c variation")
+                    fig.suptitle("Murnaghan EOS")
+                    arr[0,0].set_ylabel("Free energy (Ha)")
+                    arr[0,0].set_xlabel("Volume (bohr^3)")
+                    arr[0,2].set_xlabel("Volume (bohr^3)")
+                    arr[0,1].set_xlabel("Volume (bohr^3)")
+                    arr[1,0].set_ylabel("a (bohr)")
+                    arr[1,1].set_ylabel("c (bohr)")
+                    arr[1,2].set_ylabel("a (bohr)")
+                    ax.set_ylabel("c (bohr)",color='blue')
+                    arr[1,0].set_xlabel("Temperature (K)")
+                    arr[1,1].set_xlabel("Temperature (K)")
+                    arr[1,2].set_xlabel("Temperature (K)")
+        #            arr[1,2].legend(numpoints=1,loc=1)
+        #            ax.legend(numpoints=1,loc=2)
+                    arr[1,2].legend(numpoints=1,loc=3,bbox_to_anchor=(-1.0,0.0))
+
+                    arr2[0].set_xlabel("Temperature (K)")
+                    arr2[1].set_xlabel("Temperature (K)")
+                    arr2[0].set_ylabel(r"a (\AA)") 
+                    arr2[1].set_ylabel(r"c (\AA)") 
+
+                    #arr2[0].legend(loc=7,bbox_to_anchor=(1.1,0.5),ncol=1,numpoints=1)
+                    arr2[0].legend(loc=0,numpoints=1)
+                    arr2[1].legend(loc=0,numpoints=1)
+
+                    #fig.savefig("GaN_hex.png")
+                    fig2.savefig('GaN_hex_TE_close.png')
+                    plt.show()
 
             return fit
 
@@ -1683,6 +1797,7 @@ class Gruneisen(FreeEnergy):
         # Loop on all volumes
         for v in range(nvol):
 
+            print('\n\nReading data from {}'.format(out_flists[v]))
            # Open OUTfile
             gs = OutFile(out_flists[v])
             self.volume[v,0] = gs.volume
@@ -1723,6 +1838,7 @@ class Gruneisen(FreeEnergy):
                 # diagonalize the dynamical matrix and get the eigenfrequencies
                 if is_gamma:
                     ddb.compute_dynmat(asr=True)
+                    print('Qpt is Gamma')
                 else:
                     ddb.compute_dynmat()
                         ##### CHECK WITH GABRIEL IF I SHOULD HAVE LOTO SPLITTING AT GAMMA (WHERE DOES HIS CODE TREAT THE ELECTRIC FIELD PERTURBAITON IN THE DDB AT GAMMA???)
@@ -1756,40 +1872,41 @@ class Gruneisen(FreeEnergy):
 #                        self.omega[v,i,1] = 0.5350676926E-04
 
                 '''Manual corrections for ""negative"" frequencies in the DDB along Gamma-A, NOT in phonon dispersion...'''
-                if v==1:
-                    if i==0:
-                        print('Manually correcting some frequencies for BiTeI. Make sure it should be done!')
+                if self.manual_correction:
+                    if v==1:
+                        if i==0:
+                            print('Manually correcting some frequencies for BiTeI. Make sure it should be done!')
 
-                    if self.pressure_gpa == 0.0:
-                        if i+1==26:
-                            self.omega[v,i,0] = 0.2854956226E-04
-                            self.omega[v,i,1] = 0.2854956226E-04
-                        if i+1==56:
-                            self.omega[v,i,0] = 0.3932015304E-04
-                            self.omega[v,i,1] = 0.3932015304E-04
+                        if self.pressure_gpa == 0.0:
+                            if i+1==26:
+                                self.omega[v,i,0] = 0.2854956226E-04
+                                self.omega[v,i,1] = 0.2854956226E-04
+                            if i+1==56:
+                                self.omega[v,i,0] = 0.3932015304E-04
+                                self.omega[v,i,1] = 0.3932015304E-04
 
-                    if self.pressure_gpa == 0.5:
-                       if i+1==26:
-                           self.omega[v,i,0] = 0.4283688046E-04
-                           self.omega[v,i,1] = 0.4283688046E-04
-                       if i+1==56:
-                           self.omega[v,i,0] = 0.5818795222E-04
-                           self.omega[v,i,1] = 0.5818795222E-04
+                        if self.pressure_gpa == 0.5:
+                           if i+1==26:
+                               self.omega[v,i,0] = 0.4283688046E-04
+                               self.omega[v,i,1] = 0.4283688046E-04
+                           if i+1==56:
+                               self.omega[v,i,0] = 0.5818795222E-04
+                               self.omega[v,i,1] = 0.5818795222E-04
 
-                    if self.pressure_gpa == 1.0:
-                        if i+1==26:
-                            self.omega[v,i,0] = 0.5350676926E-04
-                            self.omega[v,i,1] = 0.5350676926E-04
+                        if self.pressure_gpa == 1.0:
+                            if i+1==26:
+                                self.omega[v,i,0] = 0.5350676926E-04
+                                self.omega[v,i,1] = 0.5350676926E-04
 
-                if self.pressure_gpa==5.0:
-                    '''Correcting an inversion of 2 phonon branches'''
-                    if i+1==11:
-                        if v!=2 and v!=5: #the 'plus' volumes are not inverted yet
-                            print('Inverting modes 6,7-8 for qpt 11')
-                            tmp = self.omega[v,i,7] #mode index 6 is now at position 8
-                            self.omega[v,i,7] = self.omega[v,i,6]
-                            self.omega[v,i,6] = self.omega[v,i,5]
-                            self.omega[v,i,5] = tmp
+                    if self.pressure_gpa==5.0:
+                        '''Correcting an inversion of 2 phonon branches'''
+                        if i+1==11:
+                            if v!=2 and v!=5: #the 'plus' volumes are not inverted yet
+                                print('Inverting modes 6,7-8 for qpt 11')
+                                tmp = self.omega[v,i,7] #mode index 6 is now at position 8
+                                self.omega[v,i,7] = self.omega[v,i,6]
+                                self.omega[v,i,6] = self.omega[v,i,5]
+                                self.omega[v,i,5] = tmp
 
 
                 if self.manual_correction==True:
@@ -2222,7 +2339,7 @@ class Gruneisen(FreeEnergy):
 
     def get_gruneisen(self, nqpt, nmode,nvol):
 
-        plot = True
+        plot = False
 
         if plot :
             import matplotlib.pyplot as plt
@@ -2643,7 +2760,7 @@ class Gruneisen(FreeEnergy):
         if self.symmetry == 'hexagonal':
             
             
-            plot = False
+            plot = True
 
             if self.verbose:
                 ggg = open('{}_integrals.dat'.format(self.rootname),'w')   
@@ -2790,17 +2907,17 @@ class Gruneisen(FreeEnergy):
                     for a2 in range(2):
                         arr[a1,a2].set_xlim(self.temperature[0],self.temperature[-1])
 
-                arr[0,2].plot(self.temperature, a*cst.bohr_to_ang,'r',label='n')
-                arr[0,2].plot(self.temperature, aplushalf*cst.bohr_to_ang,'k:',label='n + 1/2')
-                arr[0,2].plot(self.temperature, self.fitg[0,:]*cst.bohr_to_ang, 'o',color='m',label='Gibbs')
+                #arr[0,2].plot(self.temperature, a*cst.bohr_to_ang,'r',label='n')
+                #arr[0,2].plot(self.temperature, aplushalf*cst.bohr_to_ang,'k:',label='n + 1/2')
+                #arr[0,2].plot(self.temperature, self.fitg[0,:]*cst.bohr_to_ang, 'o',color='m',label='Gibbs')
 #                arr[0,1].plot(self.temperature, a2*cst.bohr_to_ang,'g',label='rigid')
 
 
 #                twin1 = arr[1].twinx()
                 arr[1,1].plot(self.temperature,dcc*1E3,'b',label='relaxed')
-                arr[1,2].plot(self.temperature,c*cst.bohr_to_ang,'b',label='n')
-                arr[1,2].plot(self.temperature,cplushalf*cst.bohr_to_ang,'k:',label='n + 1/2')
-                arr[1,2].plot(self.temperature, self.fitg[1,:]*cst.bohr_to_ang, 'o',color='m',label='Gibbs')
+                #arr[1,2].plot(self.temperature,c*cst.bohr_to_ang,'b',label='n')
+                #arr[1,2].plot(self.temperature,cplushalf*cst.bohr_to_ang,'k:',label='n + 1/2')
+                #arr[1,2].plot(self.temperature, self.fitg[1,:]*cst.bohr_to_ang, 'o',color='m',label='Gibbs')
                
 
 #                arr[1,1].plot(self.temperature,c2*cst.bohr_to_ang,'g',label='rigid')
@@ -2830,52 +2947,52 @@ class Gruneisen(FreeEnergy):
 #                arr[1,0].plot(acx,acy,'ob',label='SH exp')
 #
 #
-#                # Reeber 1999 data
-#                reeber_alphaA = EXPfile('/Users/Veronique/Google_Drive/doctorat/work/TI/GaN/TE/data/GaN_alphaAT_Reeber1999.nc')
-#                reeber_alphaA.read_nc()
-#                reeber_alphaC = EXPfile('/Users/Veronique/Google_Drive/doctorat/work/TI/GaN/TE/data/GaN_alphaCT_Reeber1999.nc')
-#                reeber_alphaC.read_nc()
-#                reeber_a = EXPfile('/Users/Veronique/Google_Drive/doctorat/work/TI/GaN/TE/data/GaN_aT_Reeber1999.nc')
-#                reeber_a.read_nc()
-#                reeber_c = EXPfile('/Users/Veronique/Google_Drive/doctorat/work/TI/GaN/TE/data/GaN_cT_Reeber1999.nc')
-#                reeber_c.read_nc()
-#
-#                arr[0,0].plot(reeber_alphaA.xaxis, reeber_alphaA.yaxis,'xr',label='Reeber1999')
-#                arr[1,0].plot(reeber_alphaC.xaxis, reeber_alphaC.yaxis,'xb',label='Reeber1999')
-#                arr[0,1].plot(reeber_a.xaxis, reeber_a.yaxis,'xr',label='Reeber1999')
-#                arr[1,1].plot(reeber_c.xaxis, reeber_c.yaxis,'xb',label='Reeber1999')
-#
+                # Reeber 1999 data
+                reeber_alphaA = EXPfile('experimental_data/GaN_alphaAT_Reeber1999.nc')
+                reeber_alphaA.read_nc()
+                reeber_alphaC = EXPfile('experimental_data/GaN_alphaCT_Reeber1999.nc')
+                reeber_alphaC.read_nc()
+                reeber_a = EXPfile('experimental_data/GaN_aT_Reeber1999.nc')
+                reeber_a.read_nc()
+                reeber_c = EXPfile('experimental_data/GaN_cT_Reeber1999.nc')
+                reeber_c.read_nc()
+
+                arr[0,0].plot(reeber_alphaA.xaxis, reeber_alphaA.yaxis,'xr',label='Reeber1999')
+                arr[1,0].plot(reeber_alphaC.xaxis, reeber_alphaC.yaxis,'xb',label='Reeber1999')
+                arr[0,2].plot(reeber_a.xaxis, reeber_a.yaxis,'xr',label='Reeber1999')
+                arr[1,2].plot(reeber_c.xaxis, reeber_c.yaxis,'xb',label='Reeber1999')
+
 #                arr[0,1].plot(self.temperature,self.independent_fit[0,:]*cst.bohr_to_ang,'go',markersize=7,label=r'ind\_fit')
 #                arr[1,1].plot(self.temperature,self.independent_fit[1,:]*cst.bohr_to_ang,'go',markersize=7,label=r'ind\_fit')
 #                arr[0,1].plot(self.temperature,self.fit2d[0,:]*cst.bohr_to_ang,'mo',markersize=5,label='fit2d')
 #                arr[1,1].plot(self.temperature,self.fit2d[1,:]*cst.bohr_to_ang,'mo',markersize=5,label='fit2d')
 
-#                roder_a = EXPfile('/Users/Veronique/Google_Drive/doctorat/work/TI/GaN/TE/data/GaN_aT_Roder2005.nc')
-#                roder_a.read_nc()
-#                roder_a1 = EXPfile('/Users/Veronique/Google_Drive/doctorat/work/TI/GaN/TE/data/GaN_aT_Roder2005_ref1.nc')
-#                roder_a1.read_nc()
-#                roder_a4 = EXPfile('/Users/Veronique/Google_Drive/doctorat/work/TI/GaN/TE/data/GaN_aT_Roder2005_ref4.nc')
-#                roder_a4.read_nc()
-#                roder_a6 = EXPfile('/Users/Veronique/Google_Drive/doctorat/work/TI/GaN/TE/data/GaN_aT_Roder2005_ref6.nc')
-#                roder_a6.read_nc()
-#                roder_c = EXPfile('/Users/Veronique/Google_Drive/doctorat/work/TI/GaN/TE/data/GaN_cT_Roder2005.nc')
-#                roder_c.read_nc()
-#                roder_c1 = EXPfile('/Users/Veronique/Google_Drive/doctorat/work/TI/GaN/TE/data/GaN_cT_Roder2005_ref1.nc')
-#                roder_c1.read_nc()
-#                roder_c4 = EXPfile('/Users/Veronique/Google_Drive/doctorat/work/TI/GaN/TE/data/GaN_cT_Roder2005_ref4.nc')
-#                roder_c4.read_nc()
-#                roder_c6 = EXPfile('/Users/Veronique/Google_Drive/doctorat/work/TI/GaN/TE/data/GaN_cT_Roder2005_ref6.nc')
-#                roder_c6.read_nc()
-#
-#                arr[0,1].plot(roder_a.xaxis, roder_a.yaxis,'vk',label='Roder2005')
-#                arr[1,1].plot(roder_c.xaxis, roder_c.yaxis,'vk',label='Roder2005')
-#                arr[0,1].plot(roder_a1.xaxis, roder_a1.yaxis,'Pk',label='Roder2005-ref1')
-#                arr[1,1].plot(roder_c1.xaxis, roder_c1.yaxis,'Pk',label='Roder2005-ref1')
-#                arr[0,1].plot(roder_a4.xaxis, roder_a4.yaxis,'sk',label='Roder2005-ref4')
-#                arr[1,1].plot(roder_c4.xaxis, roder_c4.yaxis,'sk',label='Roder2005-ref4')
-#                arr[0,1].plot(roder_a6.xaxis, roder_a6.yaxis,'*k',label='Roder2005-ref6')
-#                arr[1,1].plot(roder_c6.xaxis, roder_c6.yaxis,'*k',label='Roder2005-ref6')
-#
+                roder_a = EXPfile('experimental_data/GaN_aT_Roder2005.nc')
+                roder_a.read_nc()
+                roder_a1 = EXPfile('experimental_data/GaN_aT_Roder2005_ref1.nc')
+                roder_a1.read_nc()
+                roder_a4 = EXPfile('experimental_data/GaN_aT_Roder2005_ref4.nc')
+                roder_a4.read_nc()
+                roder_a6 = EXPfile('experimental_data/GaN_aT_Roder2005_ref6.nc')
+                roder_a6.read_nc()
+                roder_c = EXPfile('experimental_data/GaN_cT_Roder2005.nc')
+                roder_c.read_nc()
+                roder_c1 = EXPfile('experimental_data/GaN_cT_Roder2005_ref1.nc')
+                roder_c1.read_nc()
+                roder_c4 = EXPfile('experimental_data/GaN_cT_Roder2005_ref4.nc')
+                roder_c4.read_nc()
+                roder_c6 = EXPfile('experimental_data/GaN_cT_Roder2005_ref6.nc')
+                roder_c6.read_nc()
+
+                arr[0,2].plot(roder_a.xaxis, roder_a.yaxis,'vk',label='Roder2005')
+                arr[1,2].plot(roder_c.xaxis, roder_c.yaxis,'vk',label='Roder2005')
+                arr[0,2].plot(roder_a1.xaxis, roder_a1.yaxis,'Pk',label='Roder2005-ref1')
+                arr[1,2].plot(roder_c1.xaxis, roder_c1.yaxis,'Pk',label='Roder2005-ref1')
+                arr[0,2].plot(roder_a4.xaxis, roder_a4.yaxis,'sk',label='Roder2005-ref4')
+                arr[1,2].plot(roder_c4.xaxis, roder_c4.yaxis,'sk',label='Roder2005-ref4')
+                arr[0,2].plot(roder_a6.xaxis, roder_a6.yaxis,'*k',label='Roder2005-ref6')
+                arr[1,2].plot(roder_c6.xaxis, roder_c6.yaxis,'*k',label='Roder2005-ref6')
+
 #                a_pph = np.array([6.08470767295951E+00,6.09447074714269E+00,6.12096344024277E+00,6.17026163490221E+00,6.24972442596757E+00,6.37597582992085E+00,6.61966832821061E+00])
 #                c_pph = np.array([9.91152199244032E+00,9.92461271952359E+00,9.96261928816134E+00,1.00342327383386E+01,1.01504947767351E+01,1.03357790051093E+01,1.06854643693506E+01])
 #
@@ -2897,11 +3014,15 @@ class Gruneisen(FreeEnergy):
 #                arr[1,1].plot(t2,c_pphs*cst.bohr_to_ang,'yD',label='Peff lin')
 #             
 #
-#                deltaa = (a[0]*cst.bohr_to_ang-reeber_a.yaxis[0])*np.ones(self.ntemp)
-#                deltac = (c[0]*cst.bohr_to_ang-reeber_c.yaxis[0])*np.ones(self.ntemp)
-#
-#                arr[0,1].plot(self.temperature,a*cst.bohr_to_ang-deltaa,'r',linestyle='dashed',label='shifted to exp.')
-#                arr[1,1].plot(self.temperature,c*cst.bohr_to_ang-deltac,'b',linestyle='dashed',label='shifted to exp.')
+                deltaa = (a[0]*cst.bohr_to_ang-reeber_a.yaxis[0])*np.ones(self.ntemp)
+                deltac = (c[0]*cst.bohr_to_ang-reeber_c.yaxis[0])*np.ones(self.ntemp)
+                deltaa2 = (aplushalf[0]*cst.bohr_to_ang-reeber_a.yaxis[0])*np.ones(self.ntemp)
+                deltac2 = (cplushalf[0]*cst.bohr_to_ang-reeber_c.yaxis[0])*np.ones(self.ntemp)
+
+                arr[0,2].plot(self.temperature,a*cst.bohr_to_ang-deltaa,'r',linestyle='solid',label='n (shifted)')
+                arr[0,2].plot(self.temperature,aplushalf*cst.bohr_to_ang-deltaa2,'k',linestyle='dotted',label='n + 1/2 (shifted)')
+                arr[1,2].plot(self.temperature,c*cst.bohr_to_ang-deltac,'b',linestyle='solid',label='n (shifted)')
+                arr[1,2].plot(self.temperature,cplushalf*cst.bohr_to_ang-deltac2,'k',linestyle='dotted',label='n + 1/2 (shifted)')
 
 
                 plt.subplots_adjust(left=0.05,right=0.85,hspace=0.05)
@@ -3349,8 +3470,9 @@ class Static(object):
         # Data check
         if not self.etotal_flist:
             raise Exception('Must provide a list of _GSR.nc files containing total energy')
-        if not self.gap_fname:
-            raise Exception('Must provide a netCDF file containing gap energies. Please use netcdf_gap.py') 
+        if self.dedp:
+            if not self.gap_fname:
+                raise Exception('Must provide a netCDF file containing gap energies. Please use netcdf_gap.py') 
 
         
         self.nfile = len(self.etotal_flist)
@@ -3359,10 +3481,11 @@ class Static(object):
         self.gap_energy = np.empty((self.nfile))
         self.volume = np.empty((self.nfile))
 
-        gap = GapFile(self.gap_fname)
-        self.gap_energy = gap.gap_energy
-        if len(self.gap_energy) != self.nfile:
-            raise Exception('{} contains {} gap values, while there are {} files in etotal_flist. '.format(self.gap_fname, len(self.gap_energy),self.nfile))
+        if self.dedp:
+            gap = GapFile(self.gap_fname)
+            self.gap_energy = gap.gap_energy
+            if len(self.gap_energy) != self.nfile:
+                raise Exception('{} contains {} gap values, while there are {} files in etotal_flist. '.format(self.gap_fname, len(self.gap_energy),self.nfile))
 
         for n, fname in enumerate(self.etotal_flist):
 
@@ -3387,7 +3510,7 @@ class Static(object):
             popt,pcov = curve_fit(eos.murnaghan_EV, self.volume, self.etotal, p0)  
 
         else:
-            p0 = [self.volume[-1],self.etotal[-1],75,3.5]  # Guess for initial parameters
+            p0 = [self.volume[-1],self.etotal[-1],130.,4.0]  # Guess for initial parameters
             popt,pcov = curve_fit(eos.murnaghan_EV, self.volume, self.etotal, p0)  
 
         if self.static_plot:
