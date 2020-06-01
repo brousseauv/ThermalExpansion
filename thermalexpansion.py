@@ -29,39 +29,16 @@ import eos as eos
 import lmfit as lmfit
 
 from matplotlib import rc
-#rc('text', usetex = True)
-#rc('font', family = 'serif', weight = 'bold')
+rc('text', usetex = True)
+rc('font', family = 'sans-serif', weight = 'bold')
 
 ###################################
 
-    
+test: this is the master branch    
 tolx = 1E-16
 tol12 = 1E-12
 tol6 = 1E-6
 tol20 = 1E-20
-
-#class EXPfile(CDFfile):
-#
-#    def __init__(self, *args, **kwargs):
-#
-#        super(EXPfile, self).__init__(*args,**kwargs)
-#
-#        self.xaxis = None
-#        self.yaxis = None
-#        self.ndata = None
-#
-#    def read_nc(self, fname=None):
-#
-#        fname = fname if fname else self.fname
-#        super(EXPfile, self).read_nc(fname)
-#
-#        with nc.Dataset(fname,'r') as ncdata:
-#
-#            self.xaxis = ncdata.variables['ax1'][:]
-#            self.yaxis = ncdata.variables['ax2'][:]
-#            self.ndata = len(self.xaxis)
-#            self.xaxis_units = ncdata.variables['ax1'].getncattr('units')
-#            self.yaxis_units = ncdata.variables['ax2'].getncattr('units')
 
 class FreeEnergy(object):
 
@@ -127,9 +104,11 @@ class FreeEnergy(object):
     def ha2molc(self,f0,ft,v):
 
         x = (f0*np.ones((self.ntemp)) + ft)*cst.ha_to_ev*cst.ev_to_j*cst.avogadro
-        for t,T in enumerate(self.temperature):
-            #print('T = {:>3d}K : F_0+F_T = {: 13.11e} J/molc'.format(T,x[t]))
-            print('T = {:>3d}K : F_0+F_T = {: 13.11e} J/molc = {: 13.11e} Ha'.format(T,x[t],f0+ft[t]))
+
+        if self.verbose:
+            for t,T in enumerate(self.temperature):
+
+                print('T = {:>3d}K : F_0+F_T = {: 13.11e} J/molc = {: 13.11e} Ha'.format(T,x[t],f0+ft[t]))
 
         fname = '{}_anaddb.dat'.format(self.rootname)
 
@@ -250,6 +229,7 @@ class Gibbs_from_anaddb(FreeEnergy):
         bulk_modulus_units = None,
         pressure = 0.0,
         pressure_units = None,
+        eos_type = 'Murnaghan',
 
         equilibrium_index = None,
 
@@ -304,12 +284,18 @@ class Gibbs_from_anaddb(FreeEnergy):
 
         print('Computing at external pressure {} GPa'.format(self.pressure_gpa))
 
+        #Define EOS type
+        self.eos_type = eos_type
+
+        if self.eos_type != 'Murnaghan':
+            if self.eos_type != 'Birch-Murnaghan':
+                raise Exception('Implemented EOS are Murnaghan and Birch-Murnaghan. Please modify eos_type.')
 
         # set parameter space dimensions
         nvol = len(thermo_flist)
 #        self.qred = np.zeros((nqpt,3))
 
-        self.volume = np.empty((nvol,4)) # 1st index = data index, 2nd index : total cell volume, (a1,a2,a3)
+        self.volume = np.empty((nvol,4)) # [dataset, [total cell volume, a1,a2,a3]]
 
         # Read data from _THERMO files
         for v in range(nvol):
@@ -344,41 +330,31 @@ class Gibbs_from_anaddb(FreeEnergy):
             self.free_energy[v,:] = E*np.ones((self.ntemp)) + F_thermal/(cst.ha_to_ev*cst.ev_to_j*cst.avogadro) + self.pressure*self.volume[v,0]*np.ones((self.ntemp))
 
         # Minimize Ftotal
-        for t,T in enumerate(self.temperature):
-            print('for T = {}K, free energy:'.format(T))
-            print(self.free_energy[:,t])
-            print('minimal value has index {}'.format(np.argmin(self.free_energy[:,t])))
-            sort = self.free_energy[:,t].argsort()
-            print('sorted order: {}'.format(sort))
-            print('delta min:{}'.format(self.free_energy[sort[1],t]-self.free_energy[sort[0],t]))
+        if self.verbose:
+            for t,T in enumerate(self.temperature):
+                print('for T = {}K, free energy:'.format(T))
+                print('minimal value for dataset {}'.format(np.argmin(self.free_energy[:,t])))
+                sort = self.free_energy[:,t].argsort()
+                print('sorted order: {}'.format(sort))
+                print('delta min:{}'.format(self.free_energy[sort[1],t]-self.free_energy[sort[0],t]))
+                
         self.temperature_dependent_acell = self.minimize_free_energy()
 
     def minimize_free_energy(self):
 
-        plot = False
-
-        if plot:
-            import matplotlib.pyplot as plt
-        
         if self.symmetry == 'cubic':
 
             fit = np.zeros((self.ntemp))
 
+            if self.eos_type == 'Birch-Murnaghan':
+                myeos = eos.birch_murnaghan_EV
+            if self.eos_type == 'Murnaghan':
+                myeos = eos.murnaghan_EV
+
             for t, T in enumerate(self.temperature):
-#                afit = np.polyfit(self.volume[:,1],self.free_energy[:,t],2)
-#                fit[t] = -afit[1]/(2*afit[0])
                 p0 = [self.equilibrium_volume[0],self.free_energy[1,t],self.bulk_modulus,4.0]
                 popt, pcov = curve_fit(eos.murnaghan_EV, self.volume[:,0],self.free_energy[:,t],p0)
                 fit[t] = (4*popt[0])**(1./3)
-
-#                if plot:
-#                    xfit = np.linspace(9.50,12.0,100)
-#                    yfit = afit[0]*xfit**2 + afit[1]*xfit + afit[2]
-#                    plt.plot(self.volume[:,1],self.free_energy[:,t],marker='o')
-#                    plt.plot(xfit,yfit)
-
-#            if plot:
-#                plt.show()
 
             fit = np.expand_dims(fit,axis=0)
             return fit
@@ -386,7 +362,7 @@ class Gibbs_from_anaddb(FreeEnergy):
 
         if self.symmetry == 'hexagonal':
 
-            # Only independent fit for now...
+            # Only independent fit for now... take the paraboloid fit from GibbsFreeEnergy (put this in FreeEnergy global class?)
             fit = np.zeros((2,self.ntemp))
 
             import matplotlib.pyplot as plt
@@ -3386,62 +3362,6 @@ class Gruneisen(FreeEnergy):
                 f.close()
 
 
-
-class HelmholtzFreeEnergy(object):
-
-    ''' This class is deprecated. It should be removed'''
-    #Input files
-    ddb_flists = None
-    out_flists = None
-
-    #Parameters
-    units = 'eV'
-    temperature = None
-
-    def __init__(self,
-
-        ddb_flists = None,
-        out_flists = None,
-
-        units = 'eV',
-        temperature = np.arange(0,300,50),
-        rootname = 'te.out',
-
-        **kwargs):
-
-
-       
-        print('Computing Helmholtz free energy')
-        if not ddb_flists:
-            raise Exception('Must provide a list of files for ddb_flists')
-        if not out_flists:
-            raise Exception('Must provide a list of files for out_flists')        
-
-        if np.shape(out_flists)[0] != np.shape(ddb_flists)[0]:
-            raise Exception('ddb_flists and out_flists must have the same number of pressures!')
-        if np.shape(out_flists)[1] != np.shape(ddb_flists)[1]:
-            raise Exception('ddb_flists and out_flists must have the same number of volumes!')
-
-        #Set input files
-        self.ddb_flists = ddb_flists
-        self.out_flists = out_flists
-
-        self.units = units
-        self.temperature = temperature
-        self.ntemp = len(self.temperature) 
-
-        # Loop on all pressures
-            # Loop on all volumes
-                # get E
-                # get PV
-                # for each qpt:
-                    # diagonaalize the dynamical matrix and get the eigenfrequencies
-                    # get F0 contribution
-                    # get Ftherm contribution
-                
-            # Check how many lattice parametersv are inequivalent and reduce matrices
-            # Minimize G
-
 class Static(object):
 
     def __init__(self,
@@ -3690,6 +3610,7 @@ def compute(
         bulk_modulus_units = None,
         pressure = 0.0,
         pressure_units = None,
+        eos_type = 'Murnahan',
 
         expansion = True,
         gruneisen = False,
@@ -3801,25 +3722,8 @@ def compute(
         
                         **kwargs)
             else:
-                '''FIX ME'''
-                raise Exception("For thermal expansion, you should choose between Gibbs minimization or Gruneisens!")
-                calc = HelmholtzFreeEnergy(
-                        out_flists = out_flists, 
-                        ddb_flists = ddb_flists,
-            
-                        rootname = rootname,
-                        symmetry = symmetry,
-            
-                        wtq = wtq,
-                        temperature = temperature,
-                        units = units,
-                        check_anaddb = check_anaddb,
-            
-                        bulk_modulus = bulk_modulus,
-                        bulk_modulus_units = bulk_modulus_units,
-                        verbose = verbose,
-        
-                        **kwargs)
+                raise Exception("For thermal expansion, you should choose between minimization of the Helmoltz/Gibbs
+                        free energy, or Grüneisen parameters. What are you trying to compute?")
 
 
     # Write output file

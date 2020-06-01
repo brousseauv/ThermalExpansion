@@ -1,6 +1,7 @@
-#! usr/bin/env python
-
 from numpy import sqrt,ravel
+
+__author__ = "Veronique Brousseau-Couture"
+
 # Murnaghan equation of state
 
 def murnaghan_EV(V, V0,E0,K0,K0p):

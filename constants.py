@@ -1,6 +1,5 @@
-#! ussr/bin/env python
-
 # Conversion factors
+__author__ = "Veronique Brousseau-Couture"
 
 ha_to_ev = 27.211396132
 ev_to_ha = 1./ha_to_ev

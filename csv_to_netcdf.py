@@ -3,10 +3,28 @@
 import netCDF4 as nc
 import numpy as np
 
-fname = "GaAs_alphaT.csv"
+'''
+This is a sample file to convert .csv files for experimental data imported with PlotDigitizer,
+to the netcdf format used in compare_experimental_data.py
 
-out_fname = "GaAs_alphaT.nc"
+Feel free to modify for other imput formats.
+
+'''
+
+__author__ = "Veronique Brousseau-Couture"
+
+######################################################
+# rootname for the .csv / .nc file
+
+root = 'GaAs_alphaT'
+
+# units for x and y axis of experimental data
 units = ['K','10^6 K^-1']
+
+######################################################
+
+fname = '{}.csv'.format(root)
+out_fname = '{}.nc'.format(root)
 
 with open(fname,'r') as f:
 
