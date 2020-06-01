@@ -10,11 +10,6 @@ import sys
 import netCDF4 as nc
 import warnings
 import itertools as itt
-
-import matplotlib
-matplotlib.use('TKAgg') #for UdeM
-#matplotlib.use('Qt5Agg') # for home
-import matplotlib.pyplot as plt
 import constants as cst
 from scipy.optimize import least_squares,curve_fit
 
@@ -34,7 +29,6 @@ rc('font', family = 'sans-serif', weight = 'bold')
 
 ###################################
 
-test: this is the master branch    
 tolx = 1E-16
 tol12 = 1E-12
 tol6 = 1E-6
@@ -51,6 +45,8 @@ class FreeEnergy(object):
         
        self.rootname = rootname
        self.units = units
+
+       self.eos_list = ['Murnaghan', 'Birch-Murnaghan']
 
     def get_f0(self,freq):
 
@@ -287,9 +283,8 @@ class Gibbs_from_anaddb(FreeEnergy):
         #Define EOS type
         self.eos_type = eos_type
 
-        if self.eos_type != 'Murnaghan':
-            if self.eos_type != 'Birch-Murnaghan':
-                raise Exception('Implemented EOS are Murnaghan and Birch-Murnaghan. Please modify eos_type.')
+        if self.eos_type not in self.eos_list:
+            raise Exception('EOS type must be one of the following: {}'.format(self.eos_list))
 
         # set parameter space dimensions
         nvol = len(thermo_flist)
@@ -841,6 +836,8 @@ class GibbsFreeEnergy(FreeEnergy):
         equilibrium_index = None,
         manual_correction = False,
 
+        eos_type = 'Murnaghan'.
+
         **kwargs):
 
 
@@ -867,7 +864,9 @@ class GibbsFreeEnergy(FreeEnergy):
         self.equilibrium_index = equilibrium_index  #Transfer to Python indexing
         if self.equilibrium_index is None:
             raise Exception('Must provide the equilibrium volume index in volume list (in normal indexing)')
-        print('Equilibrium data is the {} volume in list'.format(self.equilibrium_index))
+        
+        if self.verbose:
+            print('Equilibrium data is the {} volume in list'.format(self.equilibrium_index))
         self.equilibrium_index -= 1
 
         self.temperature = temperature
@@ -895,7 +894,17 @@ class GibbsFreeEnergy(FreeEnergy):
         else:
             self.pressure_gpa = self.pressure*cst.habo3_to_gpa
 
+        print('Computing at external pressure {} GPa'.format(self.pressure_gpa))
 
+        #Define EOS type
+        self.eos_type = eos_type
+
+        if self.eos_type not in self.eos_list:
+            raise Exception('EOS type must be one of the following: {}'.format(self.eos_list))
+
+
+
+        # FIX ME: this should NOT be in the final version!!!
         self.manual_correction = manual_correction
 
         # set parameter space dimensions
