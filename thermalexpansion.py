@@ -11,7 +11,8 @@ import netCDF4 as nc
 import warnings
 import itertools as itt
 import constants as cst
-from scipy.optimize import least_squares,curve_fit
+''' FIX ME do I still need these two? '''
+from scipy.optimize import least_squares,curve_fit, leastsq
 
 
 from ElectronPhononCoupling import DdbFile
@@ -40,11 +41,13 @@ class FreeEnergy(object):
 
         rootname = 'te.out',
         units = 'eV',
+        verbose = False,
         
         **kwargs):
         
        self.rootname = rootname
        self.units = units
+       self.verbose = verbose
 
        self.eos_list = ['Murnaghan', 'Birch-Murnaghan']
 
@@ -226,6 +229,7 @@ class Gibbs_from_anaddb(FreeEnergy):
         pressure = 0.0,
         pressure_units = None,
         eos_type = 'Murnaghan',
+        use_axial_eos = False,
 
         equilibrium_index = None,
 
@@ -285,10 +289,13 @@ class Gibbs_from_anaddb(FreeEnergy):
 
         if self.eos_type not in self.eos_list:
             raise Exception('EOS type must be one of the following: {}'.format(self.eos_list))
+        self.use_axial_eos = use_axial_eos
 
         # set parameter space dimensions
         nvol = len(thermo_flist)
-#        self.qred = np.zeros((nqpt,3))
+
+        # Store the reduced coordinates of qpoints
+        self.qred = np.zeros((nqpt,3))
 
         self.volume = np.empty((nvol,4)) # [dataset, [total cell volume, a1,a2,a3]]
 
@@ -317,14 +324,16 @@ class Gibbs_from_anaddb(FreeEnergy):
 
             if v == self.equilibrium_index:
                 self.equilibrium_volume = self.volume[v,:]
-                print('Equilibrium volume (static): {}'.format(self.equilibrium_volume))
+                if self.verbose:
+                    print('Equilibrium volume (static): {} ha/bohr^3'.format(self.equilibrium_volume))
 
-            # get E
+            # get total energy
             E = gs.etotal[0]
 
             self.free_energy[v,:] = E*np.ones((self.ntemp)) + F_thermal/(cst.ha_to_ev*cst.ev_to_j*cst.avogadro) + self.pressure*self.volume[v,0]*np.ones((self.ntemp))
 
         # Minimize Ftotal
+
         if self.verbose:
             for t,T in enumerate(self.temperature):
                 print('for T = {}K, free energy:'.format(T))
@@ -348,10 +357,11 @@ class Gibbs_from_anaddb(FreeEnergy):
 
             for t, T in enumerate(self.temperature):
                 p0 = [self.equilibrium_volume[0],self.free_energy[1,t],self.bulk_modulus,4.0]
-                popt, pcov = curve_fit(eos.murnaghan_EV, self.volume[:,0],self.free_energy[:,t],p0)
+                popt, pcov = curve_fit(myeos, self.volume[:,0],self.free_energy[:,t],p0)
                 fit[t] = (4*popt[0])**(1./3)
 
             fit = np.expand_dims(fit,axis=0)
+
             return fit
 
 
@@ -713,17 +723,12 @@ class Gibbs_from_anaddb(FreeEnergy):
     def residuals(self,params,x,y,z):
 
         V = np.sqrt(3)/2*x**2*y
+
         return z - eos.murnaghan_EV_axial2D([x,y],params[0],params[1],params[2],params[3],params[4])
 
     def paraboloid(self, mesh, a0,A,c0,C,B):
 
         x,y = mesh
-#        a0 = p0[0]
-#        A = p0[1]
-#        c0 = p0[2]
-#        C = p0[3]
-#        B = p0[4]
-
         z = (x-a0)**2/A**2 + (y-c0)**2/C**2 + B
 
         return z
@@ -738,7 +743,6 @@ class Gibbs_from_anaddb(FreeEnergy):
         return a*x**2 + b*x + c*x*y + d*y + e*y**2 + f
 
     def residuals_parab(self,params,x,y,z):
-        # params = [a0,A,c0,C]
 
         return z - self.paraboloid([x,y],params)
 
@@ -747,7 +751,7 @@ class Gibbs_from_anaddb(FreeEnergy):
         outfile = 'OUT/{}_acell_from_eos.dat'.format(self.rootname)
         nc_outfile = 'OUT/{}_acell.nc'.format(self.rootname)
 
-        #  First, write output in netCDF format
+        # Write output in netCDF format
         create_directory(nc_outfile)
 
         with nc.Dataset(nc_outfile, 'w') as dts:
@@ -765,7 +769,7 @@ class Gibbs_from_anaddb(FreeEnergy):
             data.units = 'Bohr radius'
 
 
-        # Write also results from Free energy minimisation
+        # Write ascii file
         outfile = 'OUT/{}_acell_from_eos.dat'.format(self.rootname)
 
         create_directory(outfile)
@@ -836,12 +840,13 @@ class GibbsFreeEnergy(FreeEnergy):
         equilibrium_index = None,
         manual_correction = False,
 
-        eos_type = 'Murnaghan'.
+        eos_type = 'Murnaghan',
+        use_axial_eos = False,
 
         **kwargs):
 
 
-        print('Computing Gibbs free energy')
+        print('Thermal expansion via Gibbs free energy')
         if not ddb_flists:
             raise Exception('Must provide a list of files for ddb_flists')
         if not out_flists:
@@ -863,7 +868,7 @@ class GibbsFreeEnergy(FreeEnergy):
 
         self.equilibrium_index = equilibrium_index  #Transfer to Python indexing
         if self.equilibrium_index is None:
-            raise Exception('Must provide the equilibrium volume index in volume list (in normal indexing)')
+            raise Exception('Must provide the equilibrium volume index in volume list (Index starting at 1)')
         
         if self.verbose:
             print('Equilibrium data is the {} volume in list'.format(self.equilibrium_index))
@@ -894,22 +899,20 @@ class GibbsFreeEnergy(FreeEnergy):
         else:
             self.pressure_gpa = self.pressure*cst.habo3_to_gpa
 
-        print('Computing at external pressure {} GPa'.format(self.pressure_gpa))
+        print('\nComputing at external pressure {} GPa'.format(self.pressure_gpa))
 
         #Define EOS type
         self.eos_type = eos_type
-
         if self.eos_type not in self.eos_list:
             raise Exception('EOS type must be one of the following: {}'.format(self.eos_list))
+        self.use_axial_eos = use_axial_eos
 
-
-
-        # FIX ME: this should NOT be in the final version!!!
-        self.manual_correction = manual_correction
 
         # set parameter space dimensions
         nvol, nqpt = np.shape(self.ddb_flists)
         self.free_energy = np.zeros((nvol,self.ntemp))
+
+        #Store reduced coordinates of qpoints
         self.qred = np.zeros((nqpt,3))
 
         self.volume = np.empty((nvol,4)) # 1st index = data index, 2nd index : total cell volume, (a1,a2,a3)
@@ -925,17 +928,16 @@ class GibbsFreeEnergy(FreeEnergy):
         for v in range(nvol):
 
             print('\n\nReading data from {}'.format(self.out_flists[v]))
+
            # Open OUTfile
             gs = OutFile(out_flists[v])
             self.volume[v,0] = gs.volume
             self.volume[v,1:] = gs.acell
 
-            # Check how many lattice parametersv are inequivalent and reduce matrices 
-            # see EPC module, qptanalyser function get_se_indices and reduce_array
-            # I do the acell equivalence check only one. There should be no need to check this, as all datasets must describe the same material!
-
-        # what would be the right atol (absolute tolerance) for 2 equivalent lattice parameters? 1E-4, is it too loose?
-            if v == 0: # REDONDANT SI JE SPECIFIE EXPLICITEMENT LE TYPE DE SYMETRIE... IL VA FALLOIR FAIRE LES 7 GROUPES ?? 
+            # check how many lattice parameters are unequivalent
+            # This will need to be checked if I want a more general formulation, as for tetragonal systems,
+            # the angles may change too if the cell is primitive and not cartesian...
+            if v == 0:  
                 self.distinct_acell = self.reduce_acell(self.volume[v,1:])
                 nmode = 3*gs.natom
                 self.natom = gs.natom
@@ -951,7 +953,7 @@ class GibbsFreeEnergy(FreeEnergy):
             F_0 = 0.
             F_T = np.zeros((self.ntemp))
 
-            # Add entropy term?? 
+            # Add electronic entropy term, maybe later
 
             # for each qpt:
             for i in range(nqpt):
@@ -974,72 +976,8 @@ class GibbsFreeEnergy(FreeEnergy):
                         ##### CHECK WITH GABRIEL IF I SHOULD HAVE LOTO SPLITTING AT GAMMA (WHERE DOES HIS CODE TREAT THE ELECTRIC FIELD PERTURBAITON IN THE DDB AT GAMMA???)
 
 
-                # Store frequencies for Gruneisen parameters
+                # Store frequencies
                 self.omega[v,i,:] = ddb.omega
-
-                if self.manual_correction:
-                    if self.pressure_gpa==1.5:
-                        if i==0:
-                            print('Manually correcting some frequencies for 1.5GPa. Go double-check your volume indices!')
-
-                        #if v==1: #aminus3p
-                        #    if i+1==11:
-                        #        self.omega[v,i,0] = 0.3876424402E-04
-                        #        self.omega[v,i,1] = 0.3876424402E-04
-                        #if v==4: #aplus, for max3
-                        if v==3: #for max1
-                            if i+1==2:
-                                self.omega[v,i,0] = 0.5814735552E-04
-                                self.omega[v,i,1] = 0.5814735552E-04
-                            if i+1==11:
-                                self.omega[v,i,0] = 0.3238672157E-04
-                                self.omega[v,i,1] = 0.3238672157E-04
-                            if i+1==12:
-                                self.omega[v,i,0] = 0.5532461151E-04
-                                self.omega[v,i,1] = 0.5532461151E-04
-                            if i+1==26:
-                                self.omega[v,i,0] = 0.5684947723E-04
-                                self.omega[v,i,1] = 0.5684947723E-04
-                            if i+1==27:
-                                self.omega[v,i,0] = 0.7044317796E-04
-                                self.omega[v,i,1] = 0.7044317796E-04
-                            if i+1==41:
-                                self.omega[v,i,0] = 0.7126852424E-04
-                                self.omega[v,i,1] = 0.7126852424E-04
-                            if i+1==56:
-                                self.omega[v,i,0] = 0.7600999877E-04
-                                self.omega[v,i,1] = 0.7600999877E-04
-                        #if v==5: #aplus1p, for max3
-                        if v==4: #fro max1
-                            if i+1==11:
-                                self.omega[v,i,0] = 0.3434222844E-04
-                                self.omega[v,i,1] = 0.3434222844E-04
-                            if i+1==26:
-                                self.omega[v,i,0] = 0.6010900516E-04
-                                self.omega[v,i,1] = 0.6010900516E-04
-                        #if v==6: #aplus3p
-                        #    if i+1==11:
-                        #        self.omega[v,i,0] = 0.3180188674E-04
-                        #        self.omega[v,i,1] = 0.3180188674E-04
-                        #    if i+1==26:
-                        #        self.omega[v,i,0] = 0.5557798364E-04
-                        #        self.omega[v,i,1] = 0.5557798364E-04
-                        #if v==15: #apcm, for max3p
-                        if v==11:
-                            if i+1==11:
-                                self.omega[v,i,0] = 0.3605153969E-04
-                                self.omega[v,i,1] = 0.3605153969E-04
-                            if i+1==26:
-                                self.omega[v,i,0] = 0.6297733001E-04
-                                self.omega[v,i,1] = 0.6297733001E-04
-                        #if v==16: #apcp
-                        if v==12: #for max1
-                            if i+1==11:
-                                self.omega[v,i,0] = 0.3357405212E-04
-                                self.omega[v,i,1] = 0.3357405212E-04
-                            if i+1==26:
-                                self.omega[v,i,0] = 0.5890823654E-04
-                                self.omega[v,i,1] = 0.5890823654E-04
 
                 # get F0 contribution
                 F_0 += self.wtq[i]*self.get_f0(ddb.omega) 
@@ -1048,555 +986,174 @@ class GibbsFreeEnergy(FreeEnergy):
                 
             # Sum free energy = E + F_0 + F_T + PV
             self.free_energy[v,:] = (E+F_0)*np.ones((self.ntemp)) + F_T + self.pressure*self.volume[v,0]*np.ones((self.ntemp))
-            if v==0:
-                print('Pressure is {} {}'.format(self.pressure,self.pressure_units))
 
         if self.check_anaddb:
             # Convert results in J/mol-cell, to compare with anaddb output
             self.ha2molc(F_0,F_T,v)
 
-        # Minimize F
-        #Here, I have F[nvol,T] and also the detailed acell for each volume
-        #But I do not have a very detailed free energy surface. I should interpolate it on a finer mesh, give a model function? 
-        # For Helmholtz, what is usually done is to fit the discrete F(V,T) = F(a,T), F(b,T), F(c,T)... (each separately) with a parabola, one I have the fitting parameters I can
-            # easily get the parabola's minimum.
 
-        # To check the results, add the fitting parameters in the output file. So the fitting can be plotted afterwards.
+        # For sanity checks, the following sort the datasets by increasing free energy. 
+        if self.verbose:
+            for t,T in enumerate(self.temperature):
+                print('for T = {}K:'.format(T))
+                print('minimal free energy value has index {}'.format(np.argmin(self.free_energy[:,t])))
+                sort = self.free_energy[:,t].argsort()
+                print('sorted order: {}'.format(sort))
+                print('delta min:{}'.format(self.free_energy[sort[1],t]-self.free_energy[sort[0],t]))
 
-        # I will have to think about what to do when there is also pressure... do I just use a paraboloid for fitting and minimizing?
-        # That would be the main idea. If there is 1 independent acell, it is a parabola (x^2), if there are 2 it is a paraboloid (x^2 + y^2), if there are 3 it would be a paraboloic "volume" (x^2 +
-        # y^2 + z^2)
-        
+
         # Minimize F, according to crystal symmetry
-
-        for t,T in enumerate(self.temperature):
-            print('for T = {}K, free energy:'.format(T))
-            print(self.free_energy[:,t])
-            print('minimal value has index {}'.format(np.argmin(self.free_energy[:,t])))
-            sort = self.free_energy[:,t].argsort()
-            print('sorted order: {}'.format(sort))
-            print('delta min:{}'.format(self.free_energy[sort[1],t]-self.free_energy[sort[0],t]))
-
+        # The fitting parameters will be stored in the output file, so that the fitting can be plotted afterwards.
         self.temperature_dependent_acell = self.minimize_free_energy()
-#        self.gruneisen = self.get_gruneisen(nqpt,nmode,nvol)
-#        self.acell_via_gruneisen = self.get_acell(nqpt,nmode)
         
-# add a function to get the grüneisen mode parameters. This will require to store the frequencies for computation after all volumes have been read and analysed.
-# for the Gruneisen, I need the derivative od the frequencies vs volume.
-
     def minimize_free_energy(self):
 
-        plot = True
-
-        if plot:
-            import matplotlib.pyplot as plt
-            import matplotlib.cm as cm
-            mycmap = cm.jet
-            color_idx = np.linspace(0, 1, self.ntemp)
-
-        
         if self.symmetry == 'cubic':
 
+            # Define EOS type, for volumic fit
+            if self.eos_type == 'Murnaghan':
+                myeos = eos.murnaghan_EV
+
+            elif self.eos_type == 'Birch-Murnaghan':
+                myeos = eos.birch_murnaghan_EV
+
+
             fit = np.zeros((self.ntemp))
+            self.fit_params = np.zeros((5,self.ntemp))
+            self.fit_params_list = "V0,E0,B0,B0p"
 
             for t, T in enumerate(self.temperature):
-#                afit = np.polyfit(self.volume[:,1],self.free_energy[:,t],2)
-#                fit[t] = -afit[1]/(2*afit[0])
                 p0 = [self.equilibrium_volume[0],self.free_energy[self.equilibrium_index,t],self.bulk_modulus,4.0]
-                popt, pcov = curve_fit(eos.murnaghan_EV, self.volume[:,0],self.free_energy[:,t],p0)
+                popt, pcov = curve_fit(myeos, self.volume[:,0],self.free_energy[:,t],p0)
+
                 fit[t] = (4*popt[0])**(1./3)
-                if T==0: 
-                    print(popt)
-                    print(popt[2]*cst.habo3_to_gpa)
-                    print(pcov)
+                self.fit_params[:,t] = popt
 
-                if plot:
-                    xfit = np.linspace(0.90*self.equilibrium_volume[1],1.10*self.equilibrium_volume[1],100)
-                    yfit = eos.murnaghan_EV(0.25*xfit**3,popt[0],popt[1],popt[2],popt[3])
-                    plt.plot(self.volume[:,1],self.free_energy[:,t],linestyle='None',marker='x',color=mycmap(color_idx[t]))
-                    plt.plot(xfit,yfit,color=mycmap(color_idx[t]))
-                    plt.plot(fit[t],popt[1],marker='o',linestyle='None',color=mycmap(color_idx[t]))
-
-            if plot:
-                plt.savefig('cGaN.png')
-                plt.show()
+                # Print fitting parameters if required
+                if self.verbose:
+                    print('\n For T = {}K:'.format(T))
+                    print('    a(T) = {} bohr'.format(fit[t]))
+                    print('    Bulk modulus: {:>5.0f} GPa'.format(popt[2]*cst.habo3_to_gpa))
+                    print('    Covariance matrix: {}'.format(pcov))
 
             fit = np.expand_dims(fit,axis=0)
-            return fit
 
+            return fit
 
         if self.symmetry == 'hexagonal':
 
-            # Only independent fit for now...
             fit = np.zeros((2,self.ntemp))
+            self.volumic_fit_params = np.zeros((4,self.ntemp)) # [ [V0,E0,B0, B0'],T]
+            self.fit_params = np.zeros((5,self.ntemp)) # defined in self.fit_params_list
 
-            plot = False
-
-            if plot:
-                import matplotlib.pyplot as plt
-                import matplotlib.cm as cm
-                fig,arr = plt.subplots(2,3,sharey=False,figsize=(10,10))
-                fig2, arr2 = plt.subplots(1,2, sharey=False,figsize=(10,10))
-                ax = arr[1,2].twinx()
-                mycmap = cm.jet
-                color_idx = np.linspace(0, 1, self.ntemp)
-                print('equilibrium volume',self.equilibrium_volume)
-
-            from scipy.optimize import leastsq
-
-#            fit = np.zeros((2,self.ntemp))
-#            fit2d = np.zeros((2,self.ntemp))
-            fitg = np.zeros((2,self.ntemp))
-            fit2dg = np.zeros((2,self.ntemp))    # eos fit with least_sq
-            fit2d_cf = np.zeros((2,self.ntemp))  #eos fit with curve_fit
-            fit2d_par = np.zeros((2,self.ntemp)) #paraboloid fit
-            fitind_par = np.zeros((2,self.ntemp))
-
-
-#            if plot:
-#                import matplotlib.pyplot as plt
-#                from mpl_toolkits.mplot3d import Axes3D
-
-            ##For BiTeI only. This should be put in a special branch
-            # This delta is the difference between real HGH minimum and PAW minimum, at the current pressure
-#            if self.pressure_gpa==0.0:
-#                delta =  [0.011000356489930141,0.0844492602578999] #for 0gpa
-#            if self.pressure_gpa == 0.5:
-#                delta = [0.004513105799999195,0.0239153519999995] #for 0.5gpa
-#            if self.pressure_gpa == 1.0:
-#                delta = [0.0,0.0] #for 1gpa
-#            if self.pressure_gpa == 1.5:
-#                delta = [0.0031372478999998066,0.001351464000000746] #for 1.5gpa
-#            if self.pressure_gpa == 3.0:
-#                delta = [0.0,0.0] #for 3gpa
-#            if self.pressure_gpa == 3.5:
-#                delta = [0.001538456200000482,-0.0026159529999993936] #for 3.5gpa
-#            if self.pressure_gpa == 5.0:
-#                delta = [0.016926552700000208,-0.0055531139999995816] #for 5gpa
+            # Define EOS type, for volumic fit
+            if self.eos_type == 'Murnaghan':
+                myeos = eos.murnaghan_eV
+                if self.use_axial_eos:
+                    myeos2D = eos.murnaghan_EV_axial2D
+            if self.eos_type == 'Birch-Murnaghan':
+                myeos = eos.birch_murnaghan_EV
+                if self.use_axial_eos:
+                    myeos2D = eos.birch_murnaghan_EV_axial2D
 
 
             for t,T in enumerate(self.temperature):
 
-
                 # define bounds for optimal parameters
-                bounds_axial = [[0.95*self.equilibrium_volume[1],0.95*self.equilibrium_volume[3],1.08*self.free_energy[self.equilibrium_index,t],0.,0.],
-                                [1.08*self.equilibrium_volume[1],1.08*self.equilibrium_volume[3],0.95*self.free_energy[self.equilibrium_index,t],300.,30.]]
-                bounds_vol = [[0.95*self.equilibrium_volume[0],1.08*self.free_energy[self.equilibrium_index,t],0.,0.],
-                                [1.08*self.equilibrium_volume[0],0.95*self.free_energy[self.equilibrium_index,t],300.,30.]]
-                va = np.sqrt(3)/2*self.equilibrium_volume[3]
-                vc = np.sqrt(3)/2*(self.equilibrium_volume[1]**2)
-                bounds_a = [[va*(0.95*self.equilibrium_volume[1])**2,1.08*self.free_energy[self.equilibrium_index,t],0.,0.],
-                                [va*(1.08*self.equilibrium_volume[1])**2,0.95*self.free_energy[self.equilibrium_index,t],300.,30.]]
-                bounds_c = [[0.95*vc*self.equilibrium_volume[3],1.08*self.free_energy[self.equilibrium_index,t],0.,0.],
-                                [1.08*vc*self.equilibrium_volume[3],0.95*self.free_energy[self.equilibrium_index,t],300.,30.]]
-                bounds_para = [[0.95*self.equilibrium_volume[1],0.,0.95*self.equilibrium_volume[3],0.,1.08*self.free_energy[self.equilibrium_index,t]],
-                                [1.08*self.equilibrium_volume[1],np.inf,1.08*self.equilibrium_volume[3],np.inf,0.95*self.free_energy[self.equilibrium_index,t]]]
-
+                bounds = [[0.95*self.equilibrium_volume[0],1.08*self.free_energy[self.equilibrium_index,t],0.1*self.bulk_modulus,0.],
+                                [1.08*self.equilibrium_volume[0],0.95*self.free_energy[self.equilibrium_index,t],5*self.bulk_modulus,50.]]
+     
                 print('\n\n########## For T = {} K #####################\n'.format(T))
-                # First, treat a
-                # a0,c0, E0, B0, B0' 
-                '''or, B0=9.8GPa, B0'=7.6, B0prime has no units!!!'''
-                B0 = self.bulk_modulus #B0 is now mandatory, and already converted to Ha/bohr^3
-                B0p = 4.0
-                p0 = [self.equilibrium_volume[1],self.equilibrium_volume[3], self.free_energy[self.equilibrium_index,t],B0,B0p]
-                popt, pcov= curve_fit(eos.murnaghan_EV_axial, self.volume[:,0], self.free_energy[:,t], p0)
-                #print('  a= {} c={}'.format(popt[0],popt[1]))
 
-                #delta = [0.00313724789099998066,0.001351464000000746]
-                delta = [0.0,0.0]
-                # Fit only the a variation
-                p0a = [self.equilibrium_volume[0], self.free_energy[self.equilibrium_index,t], B0*cst.gpa_to_habo3,B0p]
-                vol_a = np.concatenate((self.volume[:3,0],self.volume[5:6,0], self.volume[13:14,0], self.volume[17:18,0]),axis=0)
-                fe_a = np.concatenate((self.free_energy[:3,t],self.free_energy[5:6,t], self.free_energy[13:14,t], self.free_energy[17:18,t]),axis=0)
-
-                popta, pcova= curve_fit(eos.murnaghan_EV, vol_a, fe_a, p0a,bounds=bounds_a)
-#                popta, pcova= curve_
-                aa = np.sqrt(2*popta[0]/(np.sqrt(3)*self.equilibrium_volume[3]))
-                #print('  a data only:, v={}, a={}'.format(popta[0],aa-delta[0]))
-                #print('  uncertainty: {}'.format(2*np.sqrt(pcova[0,0])/np.sqrt(3)*(self.equilibrium_volume[3])))
+                # Fit volume with EOS
+                '''FIX ME could also be done with lmfit...'''
+                p0 = [self.equilibrium_volume[0], self.free_energy[self.equilibrium_index,t],self.bulk_modulus,4.0]
+                popt, pcov= curve_fit(myeos, self.volume[:,0], self.free_energy[:,t], p0,bounds=bounds)
+                self.volumic_fit_params[:,t] = popt
+                if self.verbose:
+                    print('From volumic EOS fit:')
+                    print("  K0={} GPa,K0'={}".format(popt[2]/cst.gpa_to_habo3,popt[3]))
 
 
-                # Fit volume, whithout splitting into a0 and c0
-                p0v = [self.equilibrium_volume[0], self.free_energy[self.equilibrium_index,t], B0*cst.gpa_to_habo3,B0p]
-                poptv, pcovv= curve_fit(eos.murnaghan_EV, self.volume[:,0], self.free_energy[:,t], p0v,bounds=bounds_vol)
-                #print('  volume fit = {}'.format(poptv[0]))
-                #print('  K0={},k0p={}'.format(poptv[2]/cst.gpa_to_habo3,poptv[3]))
+                #Free energy surface 2D fit
+                if self.use_axial_eos:
 
+                    self.fit_params_list = "a0, c0, E0, B0, B0p"
+                    # 2D fit with lmfit, 2D EOS
+                    # First, create 2D mesh:
+                    ac_mesh = np.meshgrid(self.volume[:,1],self.volume[:,3])
+                    free_energy2D = self.free_energy[:,t]
 
-                # Fit only the c variation
-                vol_c = np.concatenate((self.volume[:1,0],self.volume[3:5,0],self.volume[21:,0]),axis=0)
-                fe_c = np.concatenate((self.free_energy[0:1,t],self.free_energy[3:5,t],self.free_energy[21:,t]),axis=0)
+                    #Create the model and initialize the parameters
+                    lmfit_model = lmfit.Model(myeos2D)
 
-                p0c = [self.equilibrium_volume[0], self.free_energy[self.equilibrium_index,t], B0*cst.gpa_to_habo3,B0p]
-                poptc, pcovc= curve_fit(eos.murnaghan_EV, vol_c, fe_c, p0c,bounds=bounds_c)
+                    params = lmfit_model.make_params()
+                    params['a0'].set(value=self.equilibrium_volume[1], vary=True,min=0.95*self.equilibrium_volume[1],max=1.08*self.equilibrium_volume[1])
+                    params['c0'].set(value=self.equilibrium_volume[3], vary=True,min=0.95*self.equilibrium_volume[3],max=1.08*self.equilibrium_volume[3])
+                    params['E0'].set(value=free_energy2D[self.equilibrium_index],vary=True,min=1.10*free_energy2D[self.equilibrium_index],max=0.95*free_energy2D[self.equilibrium_index])
+                    params['K0'].set(value=self.bulk_modulus, vary=True,min=0.1*self.bulk_modulus,max=2*self.bulk_modulus)
+                    params['K0p'].set(value=4.0, vary=True,min=2.0,max=30.0)
 
-                cc = 2*poptc[0]/(np.sqrt(3)*(self.equilibrium_volume[1]**2))
-                #print('  c data only,v = {}, c={}'.format(poptc[0],cc-delta[1]))
-                #print('  uncertainty: {}'.format(2*np.sqrt(pcovc[0,0])/(np.sqrt(3))*(self.equilibrium_volume[1]**2)))
-#                print(self.free_energy[:,t])
+                    lmfit_result = lmfit_model.fit(free_energy2D,mesh=[self.volume[:,1],self.volume[:,3]],a0=params['a0'],c0=params['c0'],E0=params['E0'],K0=params['K0'],K0p=params['K0p'])
+                    print(lmfit_result.params.pretty_print())
 
-                print('Minimizing free energy surface')
-                #afit = np.polyfit(self.volume[:3,1],self.free_energy[:3,t],2)
-                #fit[0,t] = -afit[1]/(2*afit[0])
-                #cfit = np.polyfit(self.volume[3:,3],self.free_energy[3:,t],2)
-                #fit[1,t] = -cfit[1]/(2*cfit[0])
+                    if self.verbose:
+                        print(lmfit_result.fit_report())
 
-                
-                #fit2, cov2 = leastsq(self.residuals, x0=[afit[0],afit[0],cfit[0],cfit[0],self.free_energy[1,t]], args=(self.volume[:,1],self.volume[:,3],
-                #    self.free_energy[:,t]),maxfev=4000)
-                #fit2d[:,t] = fit2[0],fit2[2]
- #               print('\nT={}'.format(T))
-                #print(fit2)
-                #print(cov2)
-#                print('independent fit')
-#                print(fit[:,t])
-#                print('2d fit')
-#                print(fit2d[:,t])
+                    fit[0,t] = lmfit_result.params['a0'].value
+                    fit[1,t] = lmfit_result.params['c0'].value
 
-                # Fit Gibbs free energy
-                # Start 2d fit from 1D result...
-                afitg = aa
-                cfitg = cc
-                #.. or, start from bare result???
-
-                K0,K0p = self.bulk_modulus, 4.0
-
-                # start from equilibrium values
-                fit2g = least_squares(self.residuals, x0=[self.equilibrium_volume[1],self.equilibrium_volume[3],self.free_energy[self.equilibrium_index,t],K0,K0p], bounds=bounds_axial,args=(self.volume[:,1],self.volume[:,3],self.free_energy[:,t]))
-                fitcf,cfopt = curve_fit(eos.murnaghan_EV_axial2D,[self.volume[:,1],self.volume[:,3]], self.free_energy[:,t], p0=[afitg,cfitg,self.free_energy[self.equilibrium_index,t],K0,K0p],bounds=bounds_axial)
-                # start from independent solution
-#                    fit2g = least_squares(self.residuals, x0=[afitg,cfitg,self.free_energy[self.equilibrium_index,t],K0,K0p], bounds=bounds_axial,args=(self.volume[:,1],self.volume[:,3],
-#                        self.free_energy[:,t]))
-#                    fitcf,cfopt = curve_fit(eos.murnaghan_EV_axial2D,[self.volume[:,1],self.volume[:,3]], self.free_energy[:,t], p0=[afitg,cfitg,self.free_energy[self.equilibrium_index,t],K0,K0p],bounds=bounds_axial)
-
-                fitpar,covpar = curve_fit(self.paraboloid,[self.volume[:,1],self.volume[:,3]], self.free_energy[:,t],
-                        p0=[self.equilibrium_volume[1],self.equilibrium_volume[1],self.equilibrium_volume[3],self.equilibrium_volume[3],self.free_energy[self.equilibrium_index,t]],
-                        bounds=bounds_para)
-
-#                else:
-#                    fit2g = least_squares(self.residuals, x0=[fit2dg[0,t-1],fit2dg[1,t-1],self.free_energy[self.equilibrium_index,t],K0,K0p], bounds=bounds_axial,args=(self.volume[:,1],self.volume[:,3],self.free_energy[:,t]))
-#                    fitcf,cfopt = curve_fit(eos.murnaghan_EV_axial2D,[self.volume[:,1],self.volume[:,3]], self.free_energy[:,t], p0=[fitcf[0],fitcf[1],self.free_energy[self.equilibrium_index,t],K0,K0p],bounds=bounds_axial)
-#                    fitpar,covpar = curve_fit(self.paraboloid,[self.volume[:,1],self.volume[:,3]], self.free_energy[:,t],
-#                            p0=[fitpar[0],fitpar[1],fitpar[2],fitpar[3],self.free_energy[self.equilibrium_index,t]],
-#                            bounds=bounds_para)
-
-                # quadratic fit for a and c
-#                myarrv = np.zeros((5))
-#                myarrv[0] = self.volume[0,3]
-#                myarrv[1:] = self.volume[5:9,3]
-#                myarrf = np.zeros((5))
-#                myarrf[0] = self.free_energy[0,t]
-#                myarrf[1:] = self.free_energy[5:9,t]
-
-                if t==0:
-                    fitaq, fitacov= curve_fit(self.quadratic, vol_a, fe_a)
-                    fitcq, fitccov= curve_fit(self.quadratic, vol_c, fe_c)
-                else:
-                    fitaq, fitacov= curve_fit(self.quadratic, self.volume[:5,1],self.free_energy[:5,t],p0=fitaq)
-                    fitcq, fitccov= curve_fit(self.quadratic,vol_c,fe_c,p0=fitcq)
-
-                fitind_par[:,t] = -fitaq[1]/(2*fitaq[0]), -fitcq[1]/(2*fitcq[0])
-                
-                # print different fit results and uncertainty
-                #print('\nwith least_squares')
-                #print('a={}, c={},K0={},K0p={}'.format(fit2g.x[0],fit2g.x[1],fit2g.x[3]*cst.habo3_to_gpa,fit2g.x[4]))
-                #print('cost function: {}'.format(fit2g.cost))
-                #print('jacobian: {}'.format(fit2g.jac))
-                #print('status; {}'.format(fit2g.status))
-                fit2dg[:,t] = fit2g.x[:2]
-#                print('Gibbs')
-            #    print(fitg[:,t]-delta)
-            #    print(fit2dg[:,t]-delta)
-                #fitg[:,t] = fitg[:,t]-delta
-                fit2dg[:,t] = fit2dg[:,t]-delta
-                #print('\nwith curve_fit EOS')
-#                print(cfopt)
-                #print('a={}, c={},K0={},K0p={}'.format(fitcf[0],fitcf[1],fitcf[3]*cst.habo3_to_gpa,fitcf[4]))
-                fit2d_cf[:,t] = fitcf[0],fitcf[1]
-
-                #print('Uncertainties:')
-                #for i in range(len(fitcf)):
-                #    print('{}'.format(np.sqrt(cfopt[i, i])))
-
-                print('\nwith curve_fit paraboloid')
-                print('a={}, c={}'.format(fitpar[0],fitpar[2]))
-                print('Uncertainties: {} {}'.format(np.sqrt(covpar[0,0]),np.sqrt(covpar[2,2])))
-                fit2d_par[:,t] = fitpar[0],fitpar[2]
-                print(covpar)
-#                print(self.gibbs_free_energy[:,t])
-                
-                #print('independent fit: a={},c={}'.format(fitind_par[0,t],fitind_par[1,t]))
-                #print(fitacov)
-                #print(fitccov)
-############### stopped copying here
-
-#                if plot:
-#                    fig = plt.figure()
-#                    arr = fig.add_subplot(111,projection='3d')
-#                    arr.plot(self.volume[:3,1],self.volume[:3,3],self.gibbs_free_energy[:3,t],marker='o',color='k',linestyle='None') #at T=0
-#                    arr.plot(self.volume[3:,1],self.volume[3:,3],self.gibbs_free_energy[3:,t],marker='o',color='b',linestyle='None') #at T=0
-#
-#                    xmesh = np.linspace(0.99*self.volume[0,1],1.01*self.volume[2,1],200)
-#                    ymesh = np.linspace(0.99*self.volume[3,3],1.01*self.volume[5,3],200)
-#                    xmesh,ymesh = np.meshgrid(xmesh,ymesh)
-#                    zmesh = self.paraboloid(xmesh,ymesh,p0=fit2g)
-#                    zlim = arr.get_zlim3d()
-#                    arr.plot_wireframe(xmesh,ymesh,zmesh)
-#                    xx = np.ones((10))
-#                    arr.plot(fit2dg[0,t]*xx,fit2dg[1,t]*xx,np.linspace(0.99999*zlim[0],1.00001*zlim[1],10),color='magenta',linewidth=2,zorder=3)
-#
-#                    out='FIG/{}_{}K.png'.format(self.rootname,T)
-#                    create_directory(out)
-#                    plt.savefig(out)
-#                    plt.show()
-#                    plt.close()
-#
-#            self.independent_fit = fit
-#            self.fit2d = fit2d 
-#            self.fitg = fitg
-#            self.fit2dg = fit2dg
-
-
-                # 2D fit with lmfit
-                # First, create my 2D mesh:
-                ac_mesh = np.meshgrid(self.volume[:,1],self.volume[:,3])
- #               print(ac_mesh)
-                free_energy2D = self.free_energy[:,t]
-#                print(np.shape(free_energy2D))
-                lmfit_model = lmfit.Model(eos.murnaghan_EV_axial2D)
-#                lmfit_model = lmfit.Model(eos.birch_murnaghan_EV_axial2D)
-
-                params = lmfit_model.make_params()
-                params['a0'].set(value=self.equilibrium_volume[1], vary=True,min=0.95*self.equilibrium_volume[1],max=1.08*self.equilibrium_volume[1])
-                params['c0'].set(value=self.equilibrium_volume[3], vary=True,min=0.95*self.equilibrium_volume[3],max=1.08*self.equilibrium_volume[3])
-                params['E0'].set(value=free_energy2D[self.equilibrium_index],vary=True,min=1.10*free_energy2D[self.equilibrium_index],max=0.95*free_energy2D[self.equilibrium_index])
-                params['K0'].set(value=self.bulk_modulus, vary=True,min=0.1*self.bulk_modulus,max=2*self.bulk_modulus)
-                params['K0p'].set(value=4.0, vary=True,min=2.0,max=30.0)
-
-                lmfit_result = lmfit_model.fit(free_energy2D,mesh=[self.volume[:,1],self.volume[:,3]],a0=params['a0'],c0=params['c0'],E0=params['E0'],K0=params['K0'],K0p=params['K0p'])
-                #print(lmfit_result.fit_report())
-                #print(lmfit_result.params.pretty_print())
-                #print(lmfit_result.params['a0'].value)
-#                fitlsq, covlsq = least_squares(self.residuals,x0=[aa,cc,popta[1],popta[2],popta[3]], args=(self.volume[:,1],self.volume[:,3],self.free_energy[:,t]))
-##                print(fitlsq)
+                    self.fit_params[0,t] = lmfit_result.params['a0'].value
+                    self.fit_params[1,t] = lmfit_result.params['c0'].value
+                    self.fit_params[2,t] = lmfit_result.params['E0'].value
+                    self.fit_params[3,t] = lmfit_result.params['K0'].value
+                    self.fit_params[4,t] = lmfit_result.params['K0p'].value
+      
 
                 ####################################
-                # 2D fit with lmfit, paraboloid function
-                # First, create my 2D mesh:
-                ac_mesh = np.meshgrid(self.volume[:,1],self.volume[:,3])
- #               print(ac_mesh)
-                free_energy2D = self.free_energy[:,t]
-#                print(np.shape(free_energy2D))
-                lmfit_model_para = lmfit.Model(eos.paraboloid_2D)
-#                lmfit_model = lmfit.Model(eos.birch_murnaghan_EV_axial2D)
+                else:
 
-                params_para = lmfit_model_para.make_params()
-                params_para['a0'].set(value=self.equilibrium_volume[1], vary=True,min=0.95*self.equilibrium_volume[1],max=1.08*self.equilibrium_volume[1])
-                params_para['c0'].set(value=self.equilibrium_volume[3], vary=True,min=0.95*self.equilibrium_volume[3],max=1.08*self.equilibrium_volume[3])
-                params_para['A'].set(value=1.,vary=True,min=0.)
-                params_para['C'].set(value=1.,vary=True,min=0.)
-                params_para['B'].set(value=free_energy2D[self.equilibrium_index],vary=True,min=1.10*free_energy2D[self.equilibrium_index],max=0.95*free_energy2D[self.equilibrium_index])
-                #print(params_para.values())
-                lmfit_result_para=lmfit_model_para.fit(free_energy2D,mesh=[self.volume[:,1],self.volume[:,3]],a0=params_para['a0'],A=params_para['A'],c0=params_para['c0'],C=params_para['C'],B=params_para['B'])
-                print(lmfit_result_para.fit_report())
-                #print(lmfit_result_para.params.pretty_print())
+                    self.fit_params_list = 'a0, A, c0, C, B=E0'
+                    # 2D fit with lmfit, Paraboloid function
+                    # First, create 2D mesh:
+                    ac_mesh = np.meshgrid(self.volume[:,1],self.volume[:,3])
+                    free_energy2D = self.free_energy[:,t]
+
+                    #Create the model and initialize the parameters
+                    lmfit_model_para = lmfit.Model(eos.paraboloid_2D)
+
+                    params_para = lmfit_model_para.make_params()
+                    params_para['a0'].set(value=self.equilibrium_volume[1], vary=True,min=0.95*self.equilibrium_volume[1],max=1.08*self.equilibrium_volume[1])
+                    params_para['c0'].set(value=self.equilibrium_volume[3], vary=True,min=0.95*self.equilibrium_volume[3],max=1.08*self.equilibrium_volume[3])
+                    params_para['A'].set(value=1.,vary=True,min=0.)
+                    params_para['C'].set(value=1.,vary=True,min=0.)
+                    params_para['B'].set(value=free_energy2D[self.equilibrium_index],vary=True,min=1.10*free_energy2D[self.equilibrium_index],max=0.95*free_energy2D[self.equilibrium_index])
+
+                    lmfit_result_para=lmfit_model_para.fit(free_energy2D,mesh=[self.volume[:,1],self.volume[:,3]],a0=params_para['a0'],A=params_para['A'],c0=params_para['c0'],C=params_para['C'],B=params_para['B'])
+                    print(lmfit_result_para.params.pretty_print())
+
+                    if self.verbose:
+                        print(lmfit_result_para.fit_report())
+
+                    fit[0,t] = lmfit_result_para.params['a0'].value
+                    fit[1,t] = lmfit_result_para.params['c0'].value
+
+                    self.fit_params[0,t] = lmfit_result_para.params['a0'].value
+                    self.fit_params[1,t] = lmfit_result_para.params['A'].value
+                    self.fit_params[2,t] = lmfit_result_para.params['c0'].value
+                    self.fit_params[3,t] = lmfit_result_para.params['C'].value
+                    self.fit_params[4,t] = lmfit_result_para.params['B'].value
+                
+                return fit
+
+#    def residuals(self,params,x,y,z):
 #
-                fit[0,t] = lmfit_result_para.params['a0'].value
-                fit[1,t] = lmfit_result_para.params['c0'].value
-                ### Plotting ####
-                ###################################################
-                if plot:
-                    #### Plotting starts here
-                    #[0,0] ; plot volume fit, a only
-                    arr[0,0].plot(vol_a,fe_a,marker='D',linestyle='None',color=mycmap(color_idx[t]))
-                    arr[0,0].plot(self.volume[0,0],self.free_energy[0,t],marker='o',linestyle='None',color=mycmap(color_idx[t]))
-                    V0=np.sqrt(3)/2*aa**2*self.equilibrium_volume[3] 
-                    arr[0,0].plot(V0, eos.murnaghan_EV(V0,popta[0],popta[1],popta[2],popta[3]),'kx')
-
-                    #[0,1]: plot volume fit, c only
-                    arr[0,1].plot(self.volume[0,0],self.free_energy[0,t],marker='o',linestyle='None',color=mycmap(color_idx[t]),mec='black')
-                    arr[0,1].plot(vol_c,fe_c,marker='s',linestyle='None',color=mycmap(color_idx[t]))
-                    #arr[0,1].plot(self.volume[10:,0],self.free_energy[10:,t],marker='s',linestyle='None',color=mycmap(color_idx[t]))
-                    V0=np.sqrt(3)/2*cc*self.equilibrium_volume[1]**2
-                    arr[0,1].plot(V0, eos.murnaghan_EV(V0,poptc[0],poptc[1],poptc[2],poptc[3]),'kx')
-
-                    dummyx = np.linspace(0.99*np.amin(self.volume[:,0]),1.01*np.amax(self.volume[:,0]),100)
-                    dummyy = eos.murnaghan_EV_axial(dummyx,popt[0],popt[1],popt[2],popt[3],popt[4])
-                    dummyyv = eos.murnaghan_EV(dummyx,poptv[0],poptv[1],poptv[2],poptv[3])
-                    dummyya = eos.murnaghan_EV(dummyx,popta[0],popta[1],popta[2],popta[3])
-                    dummyyc = eos.murnaghan_EV(dummyx,poptc[0],poptc[1],poptc[2],poptc[3])
-
-
-                    #arr[0,2].plot(self.volume[1:7,0],self.free_energy[1:7,t],marker='D',linestyle='None',color=mycmap(color_idx[t]))
-                    #arr[0,2].plot(self.volume[7:,0],self.free_energy[7:,t],marker='s',linestyle='None',color=mycmap(color_idx[t]))
-    #                arr[0,2].plot(self.volume[1:10,0],self.free_energy[1:10,t],marker='D',linestyle='None',color=mycmap(color_idx[t]))
-    #                arr[0,2].plot(self.volume[10:,0],self.free_energy[10:,t],marker='s',linestyle='None',color=mycmap(color_idx[t]))
-
-
-                    #[0,2]: plot 2D_EV, volume fit with (a0,c0) as parameters)
-                    arr[0,2].plot(self.volume[:,0],self.free_energy[:,t],marker='D',linestyle='None',color=mycmap(color_idx[t]))
-                    arr[0,2].plot(self.volume[0,0],self.free_energy[0,t],marker='o',linestyle='None',color=mycmap(color_idx[t]),markeredgecolor='black')
-
-                    arr[0,0].plot(dummyx,dummyya,color=mycmap(color_idx[t]))
-                    arr[0,1].plot(dummyx,dummyyc,color=mycmap(color_idx[t]))
-                    arr[0,2].plot(dummyx,dummyy,color=mycmap(color_idx[t]))
-
-                    #arr[0,0].plot(dummyx,dummyyv,color='black',linestyle='dashed')
-                    #arr[0,1].plot(dummyx,dummyyv,color='black',linestyle='dashed')
-                    arr[0,2].plot(dummyx,dummyyv,color='black',linestyle='dotted')
-
-                    
-                    #[0,3]: volume vs 2D fit
-                    #arr[0,3].plot(self.volume[:,0],self.free_energy[:,t],marker='D',linestyle='None',color=mycmap(color_idx[t]))
-                    #arr[0,3].plot(self.volume[0,0],self.free_energy[0,t],marker='o',linestyle='None',color=mycmap(color_idx[t]),markeredgecolor='black')
-                    #dummylsq = eos.murnaghan_EV_axial2D([self.volume[:,1],self.volume[:,3]],fit2g.x[0], fit2g.x[1],fit2g.x[2],fit2g.x[3],fit2g.x[4])
-                    #dummycf = eos.murnaghan_EV_axial2D([self.volume[:,1],self.volume[:,3]],fitcf[0], fitcf[1],fitcf[2],fitcf[3],fitcf[4])
-                    #dummypara = self.paraboloid([self.volume[:,1],self.volume[:,3]],fitpar[0], fitpar[1],fitpar[2],fitpar[3],fitpar[4])
-
-                    #arr[0,3].plot(self.volume[:,0],dummylsq,linestyle='dashed',color='k')
-                    #arr[0,3].plot(self.volume[:,0],dummycf,linestyle='dotted',color='k')
-                    #arr[0,3].plot(self.volume[:,0],dummypara,linestyle='solid',color='k')
-
-                    #plot acell(T)
-                    arr[1,0].plot(T, aa-delta[0], 'or',linestyle='None',label='indep eos')
-                    arr[1,1].plot(T, cc-delta[1], 'ob',linestyle='None')
-    #                if t==0:
-    #                    arr[1,2].plot(T, popt[0], 'or',linestyle='None',label='a')
-    #                else: 
-    #                    arr[1,2].plot(T, popt[0], 'or',linestyle='None')
-
-    #                if t==0:
-    #                    ax.plot(T,popt[1],'ob',linestyle='None',label='c')
-    #                else:
-    #                    ax.plot(T,popt[1],'ob',linestyle='None')
-
-                    arr[1,0].plot(T,fit2dg[0,t],'xr',linestyle='None',label='lsq eos')
-                    arr[1,1].plot(T,fit2dg[1,t],'xb',linestyle='None')
-
-                    arr[1,0].plot(T,fit2d_cf[0,t],'sr',linestyle='None',label='cf eos')
-                    arr[1,1].plot(T,fit2d_cf[1,t],'sb',linestyle='None')
-
-                    arr[1,0].plot(T,fit2d_par[0,t],'*r',linestyle='None',label='cf paraboloid ')
-                    arr[1,1].plot(T,fit2d_par[1,t],'*b',linestyle='None')
-
-                    #arr[1,0].plot(T,fitind_par[0,t],'*g',linestyle='None',label='quadr indep')
-                    #arr[1,1].plot(T,fitind_par[1,t],'*c',linestyle='None')
-
-                    #arr[1,2].plot(T,lmfit_result.params['a0'].value,linestyle='None',marker='D',color='r',label='lmfit-eos')
-                    arr[1,2].plot(T,lmfit_result_para.params['a0'].value,linestyle='None',marker='D',color='m',label='lmfit-para')
-
-                    #ax.plot(T,lmfit_result.params['c0'].value,linestyle='None',marker='D',color='b',label='lmfit-eos')
-                    ax.plot(T,lmfit_result_para.params['c0'].value,linestyle='None',marker='D',color='c',label='lmfit-para')
-
-                    arr[1,2].plot(T,fit2d_par[0,t],'*r',linestyle='None',label='cf paraboloid ')
-                    ax.plot(T,fit2d_par[1,t],'*b',linestyle='None')
-
-
-                    
-                    if t==0:
-                        shift_a_lmfit = (lmfit_result_para.params['a0'].value*cst.bohr_to_ang-3.18932)
-                        shift_a_cf = (fit2d_par[0,t]*cst.bohr_to_ang-3.18932)
-                        shift_c_lmfit = (lmfit_result_para.params['c0'].value*cst.bohr_to_ang-5.18549)
-                        shift_c_cf = (fit2d_par[1,t]*cst.bohr_to_ang-5.18549)
-
-                        arr2[0].plot(T,lmfit_result_para.params['a0'].value*cst.bohr_to_ang-shift_a_lmfit,linestyle='None',marker='D',color='m',label='lmfit-para',markersize=10)
-                        arr2[1].plot(T,lmfit_result_para.params['c0'].value*cst.bohr_to_ang-shift_c_lmfit,linestyle='None',marker='D',color='c',label='lmfit-para',markersize=10)
-                        arr2[0].plot(T, fit2d_par[0,t]*cst.bohr_to_ang-shift_a_cf,'*r',linestyle='None',label='cf para ',markersize=10)
-                        arr2[1].plot(T,fit2d_par[1,t]*cst.bohr_to_ang-shift_c_cf,'*b',linestyle='None',label='cf para',markersize=10)
-
-                    else:
-                        arr2[0].plot(T,lmfit_result_para.params['a0'].value*cst.bohr_to_ang-shift_a_lmfit,linestyle='None',marker='D',color='m',markersize=10)
-                        arr2[1].plot(T,lmfit_result_para.params['c0'].value*cst.bohr_to_ang-shift_c_lmfit,linestyle='None',marker='D',color='c',markersize=10)
-                        arr2[0].plot(T, fit2d_par[0,t]*cst.bohr_to_ang-shift_a_cf,'*r',linestyle='None',markersize=10)
-                        arr2[1].plot(T,fit2d_par[1,t]*cst.bohr_to_ang-shift_c_cf,'*b',linestyle='None',markersize=10)
-
-                    fit[:,t] = aa-delta[0], cc-delta[1]
-
-    #
-                    # Reeber 1999 data
-                    reeber_a = EXPfile('experimental_data/GaN_aT_Reeber1999.nc')
-                    reeber_a.read_nc()
-                    reeber_c = EXPfile('experimental_data/GaN_cT_Reeber1999.nc')
-                    reeber_c.read_nc()
-
-                    arr2[0].plot(reeber_a.xaxis, reeber_a.yaxis,'xr',label='Reeber1999')
-                    arr2[1].plot(reeber_c.xaxis, reeber_c.yaxis,'xb',label='Reeber1999')
-
-                    roder_a = EXPfile('experimental_data/GaN_aT_Roder2005.nc')
-                    roder_a.read_nc()
-                    roder_a1 = EXPfile('experimental_data/GaN_aT_Roder2005_ref1.nc')
-                    roder_a1.read_nc()
-                    roder_a4 = EXPfile('experimental_data/GaN_aT_Roder2005_ref4.nc')
-                    roder_a4.read_nc()
-                    roder_a6 = EXPfile('experimental_data/GaN_aT_Roder2005_ref6.nc')
-                    roder_a6.read_nc()
-                    roder_c = EXPfile('experimental_data/GaN_cT_Roder2005.nc')
-                    roder_c.read_nc()
-                    roder_c1 = EXPfile('experimental_data/GaN_cT_Roder2005_ref1.nc')
-                    roder_c1.read_nc()
-                    roder_c4 = EXPfile('experimental_data/GaN_cT_Roder2005_ref4.nc')
-                    roder_c4.read_nc()
-                    roder_c6 = EXPfile('experimental_data/GaN_cT_Roder2005_ref6.nc')
-                    roder_c6.read_nc()
-
-                    arr2[0].plot(roder_a.xaxis, roder_a.yaxis,'vk',label='Roder2005')
-                    arr2[1].plot(roder_c.xaxis, roder_c.yaxis,'vk',label='Roder2005')
-                    arr2[0].plot(roder_a1.xaxis, roder_a1.yaxis,'Pk',label='Roder2005-ref1')
-                    arr2[1].plot(roder_c1.xaxis, roder_c1.yaxis,'Pk',label='Roder2005-ref1')
-                    arr2[0].plot(roder_a4.xaxis, roder_a4.yaxis,'sk',label='Roder2005-ref4')
-                    arr2[1].plot(roder_c4.xaxis, roder_c4.yaxis,'sk',label='Roder2005-ref4')
-                    arr2[0].plot(roder_a6.xaxis, roder_a6.yaxis,'*k',label='Roder2005-ref6')
-                    arr2[1].plot(roder_c6.xaxis, roder_c6.yaxis,'*k',label='Roder2005-ref6')
-
-
-                    arr[0,0].set_title("a variation only")
-                    arr[0,1].set_title("c variation only")
-                    arr[0,2].set_title("a,c variation")
-                    fig.suptitle("Murnaghan EOS")
-                    arr[0,0].set_ylabel("Free energy (Ha)")
-                    arr[0,0].set_xlabel("Volume (bohr^3)")
-                    arr[0,2].set_xlabel("Volume (bohr^3)")
-                    arr[0,1].set_xlabel("Volume (bohr^3)")
-                    arr[1,0].set_ylabel("a (bohr)")
-                    arr[1,1].set_ylabel("c (bohr)")
-                    arr[1,2].set_ylabel("a (bohr)")
-                    ax.set_ylabel("c (bohr)",color='blue')
-                    arr[1,0].set_xlabel("Temperature (K)")
-                    arr[1,1].set_xlabel("Temperature (K)")
-                    arr[1,2].set_xlabel("Temperature (K)")
-        #            arr[1,2].legend(numpoints=1,loc=1)
-        #            ax.legend(numpoints=1,loc=2)
-                    arr[1,2].legend(numpoints=1,loc=3,bbox_to_anchor=(-1.0,0.0))
-
-                    arr2[0].set_xlabel("Temperature (K)")
-                    arr2[1].set_xlabel("Temperature (K)")
-                    arr2[0].set_ylabel(r"a (\AA)") 
-                    arr2[1].set_ylabel(r"c (\AA)") 
-
-                    #arr2[0].legend(loc=7,bbox_to_anchor=(1.1,0.5),ncol=1,numpoints=1)
-                    arr2[0].legend(loc=0,numpoints=1)
-                    arr2[1].legend(loc=0,numpoints=1)
-
-                    #fig.savefig("GaN_hex.png")
-                    fig2.savefig('GaN_hex_TE_close.png')
-                    plt.show()
-
-            return fit
-
-    def residuals(self,params,x,y,z):
-
-        V = np.sqrt(3)/2*x**2*y
-        return z - eos.murnaghan_EV_axial2D([x,y],params[0],params[1],params[2],params[3],params[4])
+#        V = np.sqrt(3)/2*x**2*y
+#        return z - eos.murnaghan_EV_axial2D([x,y],params[0],params[1],params[2],params[3],params[4])
 
     def paraboloid(self, mesh, a0,A,c0,C,B):
 
         x,y = mesh
-#        a0 = p0[0]
-#        A = p0[1]
-#        c0 = p0[2]
-#        C = p0[3]
-#        B = p0[4]
-
         z = (x-a0)**2/A**2 + (y-c0)**2/C**2 + B
 
         return z
@@ -1605,23 +1162,24 @@ class GibbsFreeEnergy(FreeEnergy):
 
         return a*x**2+b*x+c
 
-    def residuals_parab(self,params,x,y,z):
-        # params = [a0,A,c0,C]
+#    def residuals_parab(self,params,x,y,z):
+#
+#        return z - self.paraboloid([x,y],params)
 
-        return z - self.paraboloid([x,y],params)
+    def write_nc(self):
 
-    def write_acell(self):
+        nc_outfile = 'OUT/{}_TE.nc'.format(self.rootname)
 
-        outfile = 'OUT/{}_acell_from_eos.dat'.format(self.rootname)
-        nc_outfile = 'OUT/{}_acell.nc'.format(self.rootname)
-
-        #  First, write output in netCDF format
+        #  Write output in netCDF format
         create_directory(nc_outfile)
 
         with nc.Dataset(nc_outfile, 'w') as dts:
 
             dts.createDimension('number_of_temperatures', self.ntemp)
             dts.createDimension('number_of_lattice_parameters', len(self.distinct_acell))
+            dts.createDimension('number_of_volumes', np.shape(self.free_energy)[0])
+            dts.createDimension('four', 4)
+            dts.createDimension('number_of_fit_parameters', np.shape(self.fit_params)[0])
 
             data = dts.createVariable('temperature','d', ('number_of_temperatures'))
             data[:] = self.temperature[:]
@@ -1632,15 +1190,49 @@ class GibbsFreeEnergy(FreeEnergy):
             data[:,:] = self.temperature_dependent_acell[:,:]
             data.units = 'Bohr radius'
 
+            data = dts.createVariable('free_energy', 'd', ('number_of_volumes', 'number_of_temperatures'))
+            data[:,:] = self.free_energy[:,:]
+            data.units = 'hartree'
 
-        # Write also results from Free energy minimisation
+            data = dts.createVariable('volume','d', ('number_of_volumes','four'))
+            data[:,:] = self.volume[:,:]
+            data.units = 'bohr^3'
+
+            data = dts.createVariable('fit_paramters', 'd', ('number_of_fit_parameters','number_of_temperatures'))
+            data[:,:] = self.fit_params[:,:]
+            data.units = self.fit_params_list
+            if self.symmetry == 'hexagonal':
+                if self.use_axial_eos:
+                    data.description = self.eos_type
+                else:
+                    data.description = 'Paraboloid2D'
+            elif self.symmetry == 'cubic':
+                data.description = self.eos_type
+
+
+            data = dts.createVariable('volumic_fit_parameters', 'd', ('four','number_of_temperatures'))
+            if self.symmetry == 'hexagonal':
+                data[:,:] = self.volumic_fit_params[:,:]
+                data.units = "V0,E0,B0,B0p"
+                data.description = self.eos_type
+
+    def write_acell(self):
+
+        # Write results from Free energy minimisation in ascii format
         outfile = 'OUT/{}_acell_from_eos.dat'.format(self.rootname)
-
         create_directory(outfile)
 
         with open(outfile, 'w') as f:
 
-            f.write('Temperature dependent lattice parameters via Gibbs free energy\n\n')
+            if self.symmetry == 'cubic':
+                eos_str = self.eos_type
+            elif self.symmetry == 'hexagonal':
+                if self.use_axial_eos:
+                    eos_str = self.eos_type
+                else:
+                    eos_str = 'Paraboloid2D'
+                    
+            f.write('Temperature dependent lattice parameters via Gibbs free energy, using {} EOS\n\n'.format(eos_str))
 
             if self.symmetry == 'cubic':
 
@@ -3619,7 +3211,7 @@ def compute(
         bulk_modulus_units = None,
         pressure = 0.0,
         pressure_units = None,
-        eos_type = 'Murnahan',
+        eos_type = 'Murnaghan',
 
         expansion = True,
         gruneisen = False,
@@ -3648,6 +3240,7 @@ def compute(
                     initial_params = initial_params,
 
                     static_plot = static_plot,
+                    eos_type = eos_type,
 
                     **kwargs)
 
@@ -3678,8 +3271,9 @@ def compute(
                     verbose = verbose,
                     pressure = pressure,
                     pressure_units = pressure_units,
-        
-                    manual_correction = manual_correction,
+                    eos_type = eos_type,
+                    use_axial_eos = use_axial_eos,
+                    manual_correction = manual_correction, # should be removed...
                     **kwargs)
      
         elif gruneisen:
@@ -3728,20 +3322,18 @@ def compute(
                     verbose = verbose,
                     pressure = pressure,
                     pressure_units = pressure_units,
+                    eos_type = eos_type,
+                    use_axial_eos = use_axial_eos,
         
                         **kwargs)
             else:
-                raise Exception("For thermal expansion, you should choose between minimization of the Helmoltz/Gibbs
-                        free energy, or Grüneisen parameters. What are you trying to compute?")
+                raise Exception("For thermal expansion, you should choose between minimization of the Helmoltz/Gibbs free energy, or Grüneisen parameters. What are you trying to compute?")
 
 
-    # Write output file
-#    calc.write_freeenergy()
-        # write gibbs or helmholtz, equilibrium acells (P,T), list of temperatures, pressures, initial volumes
-        # in netcdf format, will allow to load the data for plotting
+        # Write output files
+        calc.write_nc()
         calc.write_acell()
 
-       # write equilibrium acells, in ascii file
     return
     
 
