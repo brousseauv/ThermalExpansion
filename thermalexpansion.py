@@ -1005,6 +1005,11 @@ class GibbsFreeEnergy(FreeEnergy):
         # Minimize F, according to crystal symmetry
         # The fitting parameters will be stored in the output file, so that the fitting can be plotted afterwards.
         self.temperature_dependent_acell = self.minimize_free_energy()
+        self.alpha= self.get_alpha_from_acell(self.temperature_dependent_acell)
+        self.discrete_alpha= self.discrete_alpha_vs_reftemp(self.temperature_dependent_acell, 0.)
+        self.discrete_room_temp_alpha= self.discrete_alpha_vs_reftemp(self.temperature_dependent_acell, 273.)
+        self.room_temp_alpha= self.get_alpha_vs_reftemp(self.temperature_dependent_acell, 273.)
+
         
     def minimize_free_energy(self):
 
@@ -1019,7 +1024,7 @@ class GibbsFreeEnergy(FreeEnergy):
 
 
             fit = np.zeros((self.ntemp))
-            self.fit_params = np.zeros((5,self.ntemp))
+            self.fit_params = np.zeros((4,self.ntemp))
             self.fit_params_list = "V0,E0,B0,B0p"
 
             for t, T in enumerate(self.temperature):
@@ -1048,7 +1053,7 @@ class GibbsFreeEnergy(FreeEnergy):
 
             # Define EOS type, for volumic fit
             if self.eos_type == 'Murnaghan':
-                myeos = eos.murnaghan_eV
+                myeos = eos.murnaghan_EV
                 if self.use_axial_eos:
                     myeos2D = eos.murnaghan_EV_axial2D
             if self.eos_type == 'Birch-Murnaghan':
@@ -1078,6 +1083,7 @@ class GibbsFreeEnergy(FreeEnergy):
                 #Free energy surface 2D fit
                 if self.use_axial_eos:
 
+                    print('   Using {} axial EOS'.format(self.eos_type))
                     self.fit_params_list = "a0, c0, E0, B0, B0p"
                     # 2D fit with lmfit, 2D EOS
                     # First, create 2D mesh:
@@ -1113,6 +1119,8 @@ class GibbsFreeEnergy(FreeEnergy):
                 ####################################
                 else:
 
+                    print('   Using Paraboloid2D')
+
                     self.fit_params_list = 'a0, A, c0, C, B=E0'
                     # 2D fit with lmfit, Paraboloid function
                     # First, create 2D mesh:
@@ -1144,7 +1152,7 @@ class GibbsFreeEnergy(FreeEnergy):
                     self.fit_params[3,t] = lmfit_result_para.params['C'].value
                     self.fit_params[4,t] = lmfit_result_para.params['B'].value
                 
-                return fit
+            return fit
 
 #    def residuals(self,params,x,y,z):
 #
@@ -1166,6 +1174,100 @@ class GibbsFreeEnergy(FreeEnergy):
 #
 #        return z - self.paraboloid([x,y],params)
 
+    def discrete_alpha_vs_reftemp(self,acell,ref_temp):
+
+        # get the thermal expansion coefficient vs room temperature lattice parameter
+        find_t, = np.where(self.temperature==ref_temp)
+        if len(find_t) == 0:
+            temp_index = np.argmax(np.where(self.temperature<ref_temp))
+        else: 
+            temp_index = find_t[0]
+
+        nacell = acell.shape[0]
+        alpha = np.zeros((nacell,self.ntemp))
+
+        dx = self.temperature[temp_index+1] - self.temperature[temp_index] 
+        ref_acell = acell[:,temp_index] + (acell[:,temp_index+1]-acell[:,temp_index])/dx*(ref_temp - self.temperature[temp_index])
+
+        for t in range(self.ntemp):
+            dt = self.temperature[t] - ref_temp
+
+            if dt == 0.0:
+                continue
+            else:
+                alpha[:,t] =  (acell[:,t] - ref_acell)/(ref_acell*dt)
+
+        return alpha
+
+    def get_alpha_from_acell(self,acell):
+
+        # get the thermal expansion coefficient from the lattice parameter,
+        # using central finite difference derivative
+
+        nacell = acell.shape[0]
+        alpha = np.zeros((nacell,self.ntemp))
+        a0 = acell[:,0] 
+
+        if self.temperature[0] != 0.:
+            raise Exception('Thermal expansion coefficient calculation requires that the first temperature is 0.')
+
+        dt = self.temperature[1]
+
+        for t in range(self.ntemp):
+
+            if t == 0:
+                continue
+
+            elif t == self.ntemp-1:
+                # Backwards finite difference for the last one
+                alpha[:,t] =  (acell[:,t] - acell[:,t-1])/(a0*dt)
+
+            else:
+                # Central finite difference
+                # Should there be a warning if the step is not constant??? 
+                # This should not happen from the definition of the temperature array.
+                alpha[:,t] = (acell[:,t+1] - acell[:,t-1])/(2*a0*dt)
+
+        return alpha
+
+    def get_alpha_vs_reftemp(self,acell, ref_temp):
+
+        # get the thermal expansion coefficient from the lattice parameter,
+        # using a non-zero temperature reference
+        # and central finite difference derivative
+
+        nacell = acell.shape[0]
+        alpha = np.zeros((nacell,self.ntemp))
+
+        find_t, = np.where(self.temperature==ref_temp)
+        if len(find_t) == 0:
+            temp_index = np.argmax(np.where(self.temperature<ref_temp))
+        else: 
+            temp_index = find_t[0]
+
+        dt = self.temperature[temp_index+1] - self.temperature[temp_index] 
+        ref_acell = acell[:,temp_index] + (acell[:,temp_index+1]-acell[:,temp_index])/dt*(ref_temp - self.temperature[temp_index])
+        print(acell[:,0],ref_acell)
+        print(acell)
+
+        for t in range(self.ntemp):
+
+            if t == 0:
+                # Forward finite difference of the first one
+                alpha[:,t] =  (acell[:,t+1] - acell[:,t])/(ref_acell*dt)
+
+            elif t == self.ntemp-1:
+                # Backwards finite difference for the last one
+                alpha[:,t] =  (acell[:,t] - acell[:,t-1])/(ref_acell*dt)
+
+            else:
+                # Central finite difference
+                # Should there be a warning if the step is not constant??? 
+                # This should not happen from the definition of the temperature array.
+                alpha[:,t] = (acell[:,t+1] - acell[:,t-1])/(2*ref_acell*dt)
+
+        return alpha
+
     def write_nc(self):
 
         nc_outfile = 'OUT/{}_TE.nc'.format(self.rootname)
@@ -1174,6 +1276,9 @@ class GibbsFreeEnergy(FreeEnergy):
         create_directory(nc_outfile)
 
         with nc.Dataset(nc_outfile, 'w') as dts:
+
+            #Define the type of calculation:
+            dts.description = 'FreeEnergy'
 
             dts.createDimension('number_of_temperatures', self.ntemp)
             dts.createDimension('number_of_lattice_parameters', len(self.distinct_acell))
@@ -1198,7 +1303,7 @@ class GibbsFreeEnergy(FreeEnergy):
             data[:,:] = self.volume[:,:]
             data.units = 'bohr^3'
 
-            data = dts.createVariable('fit_paramters', 'd', ('number_of_fit_parameters','number_of_temperatures'))
+            data = dts.createVariable('fit_parameters', 'd', ('number_of_fit_parameters','number_of_temperatures'))
             data[:,:] = self.fit_params[:,:]
             data.units = self.fit_params_list
             if self.symmetry == 'hexagonal':
@@ -1215,6 +1320,24 @@ class GibbsFreeEnergy(FreeEnergy):
                 data[:,:] = self.volumic_fit_params[:,:]
                 data.units = "V0,E0,B0,B0p"
                 data.description = self.eos_type
+
+            data = dts.createVariable('alpha','d', ('number_of_lattice_parameters','number_of_temperatures'))
+            data[:,:] = self.alpha[:,:]
+            data.units = 'K^-1'
+
+            data = dts.createVariable('discrete_alpha','d', ('number_of_lattice_parameters','number_of_temperatures'))
+            data[:,:] = self.discrete_alpha[:,:]
+            data.units = 'K^-1'
+
+            data = dts.createVariable('discrete_room_temp_alpha','d', ('number_of_lattice_parameters','number_of_temperatures'))
+            data[:,:] = self.discrete_room_temp_alpha[:,:]
+            data.units = 'K^-1'
+
+            data = dts.createVariable('room_temp_alpha','d', ('number_of_lattice_parameters','number_of_temperatures'))
+            data[:,:] = self.room_temp_alpha[:,:]
+            data.units = 'K^-1'
+
+
 
     def write_acell(self):
 
@@ -1277,6 +1400,7 @@ class Gruneisen(FreeEnergy):
     check_anaddb = False
     manual_correction = False
     verbose = False
+    bulk_modulus = None
 
     def __init__(self,
 
@@ -1684,6 +1808,7 @@ class Gruneisen(FreeEnergy):
         # Add a check for the right volumes ordering?
         # cubic : aminus equil aplus
         #hexagonal : aminus equil aplus cminus equil cplus
+            # FIX ME :Do I really need this???
                 
             self.free_energy[v,:] = (E+F_0)*np.ones((self.ntemp)) + F_T
             self.gibbs_free_energy[v,:] = (E+F_0+self.pressure*self.volume[v,0])*np.ones((self.ntemp)) + F_T 
@@ -1718,13 +1843,6 @@ class Gruneisen(FreeEnergy):
         # That would be the main idea. If there is 1 independent acell, it is a parabola (x^2), if there are 2 it is a paraboloid (x^2 + y^2), if there are 3 it would be a paraboloic "volume" (x^2 +
         # y^2 + z^2)
         
-        # Minimize F, according to crystal symmetry
-
-        ### Add a check for homogenious acell increase (for central finite difference)
-        self.equilibrium_volume = self.volume[1,:]
-        self.temperature_dependent_acell = self.minimize_free_energy()
-#        self.minimize_free_energy_from_eos()
-
         # Read elastic compliance from file
         if self.elastic_fname:
             elastic = ElasticFile(self.elastic_fname)
@@ -1734,24 +1852,46 @@ class Gruneisen(FreeEnergy):
             bmod = self.get_bulkmodulus_from_elastic(elastic.stiffness_relaxed)
             bmod2 = self.get_bulkmodulus_from_elastic(elastic.stiffness_clamped)
             self.bulkmodulus_from_elastic = bmod
+            ##FIX ME: what to do i we want to use th inputted (experimental) bulk modulus?)
+            if self.symmetry == 'cubic':
+                if self.bulk_modulus is None:
+                    print('Using bulk modulus from elastic constants.')
+                    self.bulk_modulus = self.bulkmodulus_from_elastic*cst.gpa_to_habo3
+                else:
+                    print('Using bulk modulus from input file.')
+
             print('Bulk modulus from elastic constants = {:>7.3f} GPa'.format(bmod))
             print('Bulk modulus from elastic constants (clamped) = {:>7.3f} GPa'.format(bmod2))
 
             print('Elastic constants:')
             print('c11 = {}, c33 = {}, c12 = {}, c13 = {} GPa'.format(elastic.stiffness_relaxed[0,0],elastic.stiffness_relaxed[2,2],elastic.stiffness_relaxed[0,1],elastic.stiffness_relaxed[0,2]))
+            print('Clamped:')
+            print('c11 = {}, c33 = {}, c12 = {}, c13 = {} GPa'.format(elastic.stiffness_clamped[0,0],elastic.stiffness_clamped[2,2],elastic.stiffness_clamped[0,1],elastic.stiffness_clamped[0,2]))
+
             print('Compliance constants:')
             print('s11 = {}, s33 = {}, s12 = {}, s13 = {} GPa^-1'.format(elastic.compliance_relaxed[0,0],elastic.compliance_relaxed[2,2],elastic.compliance_relaxed[0,1],elastic.compliance_relaxed[0,2]))
 
 
+        # Minimize F, according to crystal symmetry
+
+        ### Add a check for homogenious acell increase (for central finite difference)
+        self.equilibrium_volume = self.volume[1,:]
+        self.temperature_dependent_acell = self.minimize_free_energy()
+#        self.minimize_free_energy_from_eos()
+
+
         self.gruneisen = self.get_gruneisen(nqpt,nmode,nvol)
         self.acell_via_gruneisen = self.get_acell(nqpt,nmode)
-        self.effective_phonon_pressure = self.get_phonon_effective_pressure(nqpt,nmode)
+        self.discrete_room_temp_alpha = self.discrete_alpha_vs_reftemp(self.temperature_dependent_acell, 273.)
+        self.discrete_alpha = self.discrete_alpha_vs_reftemp(self.temperature_dependent_acell, 0.)
+        self.room_temp_alpha= self.get_alpha_vs_reftemp(self.temperature_dependent_acell, 273.)
+#        self.effective_phonon_pressure = self.get_phonon_effective_pressure(nqpt,nmode)
         
 # add a function to get the grüneisen mode parameters. This will require to store the frequencies for computation after all volumes have been read and analysed.
 # for the Gruneisen, I need the derivative od the frequencies vs volume.
 
     def minimize_free_energy_from_eos(self):
-
+        ### FIX ME : remove this function
         ## Same as minimize_free_energy, but fit a Murnaghan EOS instead of a paraboloid
 
         if self.symmetry == 'hexagonal':
@@ -2216,7 +2356,7 @@ class Gruneisen(FreeEnergy):
         # Evaluate acell(T) from Gruneisen parameters
         if self.symmetry == 'cubic':
             
-            plot = True
+            plot = False
             # First, get alpha(T)
 
             # Get Bose-Einstein factor and specific heat Cv
@@ -2247,11 +2387,23 @@ class Gruneisen(FreeEnergy):
 
 
             # Then, get a(T)
-            integral = 1./(9*self.bulk_modulus*self.volume[1,0])*np.einsum('q,qvt,qv->t',self.wtq,hwt,self.gruneisen)
+            integral = 1./(9*self.bulk_modulus*self.equilibrium_volume[0])*np.einsum('q,qvt,qv->t',self.wtq,hwt,self.gruneisen)
             a = self.equilibrium_volume[1]*(integral+1)
 
+            # Renormalize the a(T=0) with the zero-point energy contribution
             integral_plushalf = 1./(9*self.bulk_modulus*self.volume[1,0])*np.einsum('q,qvt,qv->t',self.wtq,hwt_plushalf,self.gruneisen)
-            a_plushalf = self.equilibrium_volume[1]*(integral_plushalf+1)
+            new_acell0 = self.equilibrium_volume[1]*(1+1./(9*self.bulk_modulus*self.equilibrium_volume[0])*np.einsum('q,qv,qv->',self.wtq,self.omega[1,:,:],self.gruneisen)*0.5)
+            print('################ static_acell0 : {} bohr, new_acell0:, {} (bohr)'.format(self.equilibrium_volume[1], new_acell0))
+            print('delta = {} bohr, delta a/a0 stat = {}%'.format(new_acell0-self.equilibrium_volume[1], (new_acell0-self.equilibrium_volume[1])/self.equilibrium_volume[1]*100))
+            new_V0 = new_acell0**3/4.
+            print('stat V0: {}, newV0: {}'.format(self.equilibrium_volume[0], new_V0))
+            integral_newacell0 = 1./(9*self.bulk_modulus*new_V0)*np.einsum('q,qvt,qv->t',self.wtq,hwt,self.gruneisen)
+
+            a_plushalf = new_acell0*(integral+1)
+            #a_plushalf = new_acell0*(integral_newacell0+1)
+            
+            test_acell = self.equilibrium_volume[1]*(integral_plushalf + 1)
+            print('testacell={} bohr'.format(test_acell[0]))
 
 
             integralvol = 1./(self.bulk_modulus*self.volume[1,0])*np.einsum('q,qvt,qv->t',self.wtq,hwt,self.gruvol)
@@ -2332,6 +2484,9 @@ class Gruneisen(FreeEnergy):
 
             a = np.expand_dims(a,axis=0)
             self.acell_plushalf = np.expand_dims(a_plushalf,axis=0)
+            self.alpha = np.expand_dims(alpha, axis=0)
+
+            self.cv = np.einsum('q,qvt->t',self.wtq,cv)
             return a
 
         if self.symmetry == 'hexagonal':
@@ -2636,11 +2791,73 @@ class Gruneisen(FreeEnergy):
 #            for t,T in enumerate(self.temperature):
 #                print('T={}K, a={} ang, c={} ang'.format(T,a[t]*cst.bohr_to_ang,c[t]*cst.bohr_to_ang))
 
-
+            self.alpha = [alpha_a, alpha_c]
 
             return acell
 
 
+    def discrete_alpha_vs_reftemp(self,acell,ref_temp):
+
+        # Get the thermal expansion coefficient vs room temperature lattice parameter
+        find_t, = np.where(self.temperature==ref_temp)
+        if len(find_t)==0:
+            temp_index = np.argmax(np.where(self.temperature<ref_temp))
+        else: 
+            temp_index = find_t[0]
+
+        nacell = acell.shape[0]
+        alpha = np.zeros((nacell,self.ntemp))
+
+        dx = self.temperature[temp_index+1] - self.temperature[temp_index] 
+
+        ref_acell = acell[:,temp_index] + (acell[:,temp_index+1]-acell[:,temp_index])/dx*(ref_temp - self.temperature[temp_index])
+
+        for t in range(self.ntemp):
+            dt = self.temperature[t] - ref_temp
+
+            if dt == 0.0:
+                continue
+            else:
+                alpha[:,t] =  (acell[:,t] - ref_acell)/(ref_acell*dt)
+
+        return alpha
+
+    def get_alpha_vs_reftemp(self,acell, ref_temp):
+
+        # get the thermal expansion coefficient from the lattice parameter,
+        # using a non-zero temperature reference
+        # and central finite difference derivative
+
+        nacell = acell.shape[0]
+        alpha = np.zeros((nacell,self.ntemp))
+
+        find_t, = np.where(self.temperature==ref_temp)
+        if len(find_t) == 0:
+            temp_index = np.argmax(np.where(self.temperature<ref_temp))
+        else: 
+            temp_index = find_t[0]
+
+        dt = self.temperature[temp_index+1] - self.temperature[temp_index] 
+        ref_acell = acell[:,temp_index] + (acell[:,temp_index+1]-acell[:,temp_index])/dt*(ref_temp - self.temperature[temp_index])
+
+
+        for t in range(self.ntemp):
+
+            if t == 0:
+                # Forward finite difference of the first one
+                alpha[:,t] =  (acell[:,t+1] - acell[:,t])/(ref_acell*dt)
+
+            elif t == self.ntemp-1:
+                # Backwards finite difference for the last one
+                alpha[:,t] =  (acell[:,t] - acell[:,t-1])/(ref_acell*dt)
+
+            else:
+                # Central finite difference
+                # Should there be a warning if the step is not constant??? 
+                # This should not happen from the definition of the temperature array.
+                alpha[:,t] = (acell[:,t+1] - acell[:,t-1])/(2*ref_acell*dt)
+
+        return alpha
 
     def get_phonon_effective_pressure(self,nqpt,nmode):
 
@@ -2845,19 +3062,22 @@ class Gruneisen(FreeEnergy):
         return gru
 
 
-    def write_acell(self):
+    def write_nc(self):
 
-        outfile = 'OUT/{}_acell_from_gruneisen.dat'.format(self.rootname)
-        nc_outfile = 'OUT/{}_acell.nc'.format(self.rootname)
+        nc_outfile = 'OUT/{}_TE.nc'.format(self.rootname)
 
         #  First, write output in netCDF format
         create_directory(nc_outfile)
 
         with nc.Dataset(nc_outfile, 'w') as dts:
 
+             #Define the type of calculation:
+            dts.description = 'Gruneisen'
+
             dts.createDimension('number_of_temperatures', self.ntemp)
             dts.createDimension('number_of_lattice_parameters', len(self.distinct_acell))
             dts.createDimension('one',1)
+#            dts.createDimension('number_of_volumes', np.shape(self.volume)[0])
 
             data = dts.createVariable('temperature','d', ('number_of_temperatures'))
             data[:] = self.temperature[:]
@@ -2872,21 +3092,34 @@ class Gruneisen(FreeEnergy):
             data.units = 'Bohr radius'
 
 
-            data = dts.createVariable('acell_from_helmholtz','d',('number_of_lattice_parameters','number_of_temperatures'))
-            data[:,:] = self.temperature_dependent_acell[:,:]
-            data.units = 'Bohr radius'
+#            data = dts.createVariable('acell_from_helmholtz','d',('number_of_lattice_parameters','number_of_temperatures'))
+#            data[:,:] = self.temperature_dependent_acell[:,:]
+#            data.units = 'Bohr radius'
+#
+#            data = dts.createVariable('acell_from_gibbs','d',('number_of_lattice_parameters','number_of_temperatures'))
+#            data[:,:] = self.fitg[:,:]
+#            data.units = 'Bohr radius'
 
-            data = dts.createVariable('acell_from_gibbs','d',('number_of_lattice_parameters','number_of_temperatures'))
-            data[:,:] = self.fitg[:,:]
-            data.units = 'Bohr radius'
-
-            data = dts.createVariable('alpha_a','d', ('number_of_temperatures'))
-            data[:] = self.alpha_a[:]
+            data = dts.createVariable('alpha','d', ('number_of_lattice_parameters','number_of_temperatures'))
+            data[:,:] = self.alpha[:,:]
             data.units = 'K^-1'
 
-            data = dts.createVariable('alpha_c','d', ('number_of_temperatures'))
-            data[:] = self.alpha_c[:]
+            data = dts.createVariable('discrete_room_temp_alpha','d', ('number_of_lattice_parameters','number_of_temperatures'))
+            data[:,:] = self.discrete_room_temp_alpha[:,:]
             data.units = 'K^-1'
+
+            data = dts.createVariable('discrete_alpha','d', ('number_of_lattice_parameters','number_of_temperatures'))
+            data[:,:] = self.discrete_alpha[:,:]
+            data.units = 'K^-1'
+
+            data = dts.createVariable('room_temp_alpha','d', ('number_of_lattice_parameters','number_of_temperatures'))
+            data[:,:] = self.room_temp_alpha[:,:]
+            data.units = 'K^-1'
+
+
+#            data = dts.createVariable('alpha_c','d', ('number_of_temperatures'))
+#            data[:] = self.alpha_c[:]
+#            data.units = 'K^-1'
 
             data = dts.createVariable('bulk_modulus_habo3','d',('one'))
             data[:] = self.bulkmodulus_from_elastic*cst.gpa_to_habo3
@@ -2897,7 +3130,10 @@ class Gruneisen(FreeEnergy):
 
 
 
+    def write_acell(self):
         # Then, write them in ascii file
+
+        outfile = 'OUT/{}_acell_from_gruneisen.dat'.format(self.rootname)
         create_directory(outfile)
 
         with open(outfile, 'w') as f:
@@ -2909,6 +3145,12 @@ class Gruneisen(FreeEnergy):
                 f.write('{:12}    {:12}\n'.format('Temperature','a (bohr)'))
                 for t,T in enumerate(self.temperature):
                     f.write('{:>8.1f} K    {:>12.8f}\n'.format(T,self.acell_via_gruneisen[0,t]))
+
+                f.write('\n\nWith ZPR-latt using Gruneisens\n\n')
+                f.write('{:12}      {:<12}\n'.format('Temperature','a (bohr)'))
+                for t,T in enumerate(self.temperature):
+                    f.write('{:>8.1f} K    {:>12.8f}\n'.format(T,self.acell_plushalf[0,t]))
+
 
                 f.close()
 
@@ -3212,6 +3454,7 @@ def compute(
         pressure = 0.0,
         pressure_units = None,
         eos_type = 'Murnaghan',
+        use_axial_eos = False,
 
         expansion = True,
         gruneisen = False,
