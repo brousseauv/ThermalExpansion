@@ -860,6 +860,7 @@ class GibbsFreeEnergy(FreeEnergy):
         self.ddb_flists = ddb_flists
         self.out_flists = out_flists
         self.symmetry = symmetry
+
         if not self.symmetry:
             raise Exception('Symmetry type must be specified')
 
@@ -886,7 +887,6 @@ class GibbsFreeEnergy(FreeEnergy):
                 self.bulk_modulus = bulk_modulus
             else:
                 raise Exception('Bulk modulus units must be GPa or Ha/bohr^3')
-
         self.pressure_units = pressure_units
         self.pressure = pressure
 
@@ -1007,8 +1007,9 @@ class GibbsFreeEnergy(FreeEnergy):
         self.temperature_dependent_acell = self.minimize_free_energy()
         self.alpha= self.get_alpha_from_acell(self.temperature_dependent_acell)
         self.discrete_alpha= self.discrete_alpha_vs_reftemp(self.temperature_dependent_acell, 0.)
-        self.discrete_room_temp_alpha= self.discrete_alpha_vs_reftemp(self.temperature_dependent_acell, 273.)
-        self.room_temp_alpha= self.get_alpha_vs_reftemp(self.temperature_dependent_acell, 273.)
+        self.discrete_room_temp_alpha= self.discrete_alpha_vs_reftemp(self.temperature_dependent_acell, 293.)
+        self.room_temp_alpha= self.get_alpha_vs_reftemp(self.temperature_dependent_acell, 293.)
+        self.compute_specific_heat(nqpt, nmode)
 
         
     def minimize_free_energy(self):
@@ -1042,6 +1043,9 @@ class GibbsFreeEnergy(FreeEnergy):
                     print('    Covariance matrix: {}'.format(pcov))
 
             fit = np.expand_dims(fit,axis=0)
+            print('########### T=0 K')
+            print('delta = {:>7.4f} bohr, delta a/a0 stat = {:>6.4f}%'.format((fit[0,0]-self.equilibrium_volume[1]).round(4), (fit[0,0]-self.equilibrium_volume[1]).round(4)/self.equilibrium_volume[1].round(4)*100))
+
 
             return fit
 
@@ -1152,12 +1156,24 @@ class GibbsFreeEnergy(FreeEnergy):
                     self.fit_params[3,t] = lmfit_result_para.params['C'].value
                     self.fit_params[4,t] = lmfit_result_para.params['B'].value
                 
+            print('########### T=0 K')
+            print('delta a = {:>7.4f} bohr, delta a/a0 stat = {:>6.4f}%'.format((fit[0,0]-self.equilibrium_volume[1]).round(4), (fit[0,0]-self.equilibrium_volume[1]).round(4)/self.equilibrium_volume[1].round(4)*100))
+            print('delta c = {:>7.4f} bohr, delta c/c0 stat = {:>6.4f}%'.format((fit[1,0]-self.equilibrium_volume[3]).round(4), (fit[1,0]-self.equilibrium_volume[3]).round(4)/self.equilibrium_volume[3].round(4)*100))
+
             return fit
 
 #    def residuals(self,params,x,y,z):
 #
 #        V = np.sqrt(3)/2*x**2*y
 #        return z - eos.murnaghan_EV_axial2D([x,y],params[0],params[1],params[2],params[3],params[4])
+
+    def compute_specific_heat(self, nqpt, nmode):
+        cv = np.zeros((nqpt,nmode,self.ntemp))
+
+        for i,n in itt.product(range(nqpt),range(nmode)):
+            cv[i,n,:] = self.get_specific_heat(self.omega[1,i,n],self.temperature)
+            
+        self.cv = np.einsum('q,qvt->t',self.wtq,cv)
 
     def paraboloid(self, mesh, a0,A,c0,C,B):
 
@@ -1303,6 +1319,10 @@ class GibbsFreeEnergy(FreeEnergy):
             data[:,:] = self.volume[:,:]
             data.units = 'bohr^3'
 
+            data = dts.createVariable('equilibrium_volume','d', ('four'))
+            data[:] = self.equilibrium_volume[:]
+            data.units = 'bohr^3'
+
             data = dts.createVariable('fit_parameters', 'd', ('number_of_fit_parameters','number_of_temperatures'))
             data[:,:] = self.fit_params[:,:]
             data.units = self.fit_params_list
@@ -1337,6 +1357,9 @@ class GibbsFreeEnergy(FreeEnergy):
             data[:,:] = self.room_temp_alpha[:,:]
             data.units = 'K^-1'
 
+            data = dts.createVariable('specific_heat','d',('number_of_temperatures'))
+            data[:] = self.cv
+            data.units = 'Ha/K'
 
 
     def write_acell(self):
@@ -1402,6 +1425,8 @@ class Gruneisen(FreeEnergy):
     verbose = False
     bulk_modulus = None
 
+    eos_type = 'Murnaghan'
+
     def __init__(self,
 
         rootname,
@@ -1424,6 +1449,8 @@ class Gruneisen(FreeEnergy):
         bulk_modulus_units = None,
         manual_correction = False,
         verbose = False,
+
+        eos_type = 'Murnaghan',
 
         **kwargs):
 
@@ -1476,6 +1503,11 @@ class Gruneisen(FreeEnergy):
                 self.bulk_modulus = bulk_modulus
             else:
                 raise Exception('Bulk modulus units must be GPa or Ha/bohr^3')
+
+        #Define EOS type
+        self.eos_type = eos_type
+        if self.eos_type not in self.eos_list:
+            raise Exception('EOS type must be one of the following: {}'.format(self.eos_list))
 
         # set parameter space dimensions
         '''why the hell does the shape sometimes work and sometimes not???'''
@@ -1823,11 +1855,12 @@ class Gruneisen(FreeEnergy):
         ''' First fit of Murnaghan EOS from static calc results, to get parameters??? or use them as input???'''
 
         ''' Fit Murnaghan EOS for Ftot(V) at each T, to get the 'real' P I must add for the Gibbs free energy'''
-        for t,T in enumerate(self.temperature):
-            print('T={} K'.format(T))
-            print(self.gibbs_free_energy[:,t])
-            print('minimal value has index {}'.format(np.argmin(self.gibbs_free_energy[:,t])))
-            print('sorted order: {}'.format(self.gibbs_free_energy[:,t].argsort()))   
+        if self.verbose:
+            for t,T in enumerate(self.temperature):
+                print('T={} K'.format(T))
+                print(self.gibbs_free_energy[:,t])
+                print('minimal value has index {}'.format(np.argmin(self.gibbs_free_energy[:,t])))
+                print('sorted order: {}'.format(self.gibbs_free_energy[:,t].argsort()))   
 
 
 
@@ -1870,172 +1903,221 @@ class Gruneisen(FreeEnergy):
 
             print('Compliance constants:')
             print('s11 = {}, s33 = {}, s12 = {}, s13 = {} GPa^-1'.format(elastic.compliance_relaxed[0,0],elastic.compliance_relaxed[2,2],elastic.compliance_relaxed[0,1],elastic.compliance_relaxed[0,2]))
+            print('Clamped:')
+            print('s11 = {}, s33 = {}, s12 = {}, s13 = {} GPa^-1'.format(elastic.compliance_clamped[0,0],elastic.compliance_clamped[2,2],elastic.compliance_clamped[0,1],elastic.compliance_clamped[0,2]))
+
 
 
         # Minimize F, according to crystal symmetry
 
         ### Add a check for homogenious acell increase (for central finite difference)
         self.equilibrium_volume = self.volume[1,:]
-        self.temperature_dependent_acell = self.minimize_free_energy()
-#        self.minimize_free_energy_from_eos()
+#        print('before free energy')
+#        self.temperature_dependent_acell = self.minimize_free_energy()
+#        print('after free energy')
+        self.minimize_free_energy_from_eos()
 
 
         self.gruneisen = self.get_gruneisen(nqpt,nmode,nvol)
         self.acell_via_gruneisen = self.get_acell(nqpt,nmode)
-        self.discrete_room_temp_alpha = self.discrete_alpha_vs_reftemp(self.temperature_dependent_acell, 273.)
-        self.discrete_alpha = self.discrete_alpha_vs_reftemp(self.temperature_dependent_acell, 0.)
-        self.room_temp_alpha= self.get_alpha_vs_reftemp(self.temperature_dependent_acell, 273.)
+        self.discrete_room_temp_alpha = self.discrete_alpha_vs_reftemp(self.acell_via_gruneisen, 293.)
+        self.discrete_alpha = self.discrete_alpha_vs_reftemp(self.acell_via_gruneisen, 0.)
+        self.room_temp_alpha= self.get_alpha_vs_reftemp(self.acell_via_gruneisen, 293.)
 #        self.effective_phonon_pressure = self.get_phonon_effective_pressure(nqpt,nmode)
         
 # add a function to get the grüneisen mode parameters. This will require to store the frequencies for computation after all volumes have been read and analysed.
 # for the Gruneisen, I need the derivative od the frequencies vs volume.
 
     def minimize_free_energy_from_eos(self):
-        ### FIX ME : remove this function
-        ## Same as minimize_free_energy, but fit a Murnaghan EOS instead of a paraboloid
+        # Minimize_free_energy, with an EOS, to obtain the fitting parameters E0, V0, B0, B0'
+        # Volumic fit only as fitting with (a_0, c_0) is not stable
 
-        if self.symmetry == 'hexagonal':
-
-            # Only independent fit for now...
-            fit = np.zeros((2,self.ntemp))
-
-            for t,T in enumerate(self.temperature):
-
-                # First, treat a
-                # V0, E0, B0, B0' 
-                '''or, B0=9.8, B0'=7.6'''
-                p0 = [self.equilibrium_volume[1],self.equilibrium_volume[3], self.gibbs_free_energy[1,t], 8.7*cst.gpa_to_habo3,8.9*cst.gpa_to_habo3]
-                popt, pcov= curve_fit(eos.murnaghan_EV_axial, self.volume[:,0], self.gibbs_free_energy[:,t], p0)
-#                print('for T={}K, popt= {}'.format(T,popt))
-        
-
-    def minimize_free_energy(self):
-
-        plot = False
-
-        if plot:
-            import matplotlib.pyplot as plt
-        
         if self.symmetry == 'cubic':
-            
-            fit = np.zeros((self.ntemp))
 
-            for t, T in enumerate(self.temperature):
-                afit = np.polyfit(self.volume[:,1],self.free_energy[:,t],2)
-                fit[t] = -afit[1]/(2*afit[0])
+#             # Define EOS type, for volumic fit
+#             if self.eos_type == 'Murnaghan':
+#                 myeos = eos.murnaghan_EV
+# 
+#             elif self.eos_type == 'Birch-Murnaghan':
+#                 myeos = eos.birch_murnaghan_EV
+# 
+# 
+#             self.eos_fit_params = np.zeros((4,self.ntemp))
+#             self.eos_fit_params_list = "V0,E0,B0,B0p"
+# 
+#             for t, T in enumerate(self.temperature):
+#                 p0 = [self.equilibrium_volume[0],self.free_energy[1,t],self.bulk_modulus,4.0]
+#                 popt, pcov = curve_fit(myeos, self.volume[:,0],self.free_energy[:,t],p0)
+# 
+#                 self.eos_fit_params[:,t] = popt
+# 
+#                 # Print fitting parameters if required
+#                 if self.verbose:
+#                     print('\n For T = {}K:'.format(T))
+#                     print('    Bulk modulus: {:>5.0f} GPa'.format(popt[2]*cst.habo3_to_gpa))
+#                     print('    Covariance matrix: {}'.format(pcov))
 
-                if plot:
-                    xfit = np.linspace(9.50,12.0,100)
-                    yfit = afit[0]*xfit**2 + afit[1]*xfit + afit[2]
-                    plt.plot(self.volume[:,1],self.free_energy[:,t],marker='o')
-                    plt.plot(xfit,yfit)
-
-            if plot:
-                plt.show()
-
-            #### ONLY FOR GaAs !!!!! Rescale expansion to experimental parameter
-        #    fit = fit - np.ones(len(fit))*0.18573269
-
-            fit = np.expand_dims(fit,axis=0)
-            return fit
+            return 
 
         if self.symmetry == 'hexagonal':
-            
-            from scipy.optimize import leastsq
 
-            fit = np.zeros((2,self.ntemp))
-            fit2d = np.zeros((2,self.ntemp))
-            fitg = np.zeros((2,self.ntemp))
-            fit2dg = np.zeros((2,self.ntemp))
+            self.eos_fit_params = np.zeros((4,self.ntemp)) # [ [V0,E0,B0, B0'],T]
+            self.eos_fit_params_list = "V0,E0,B0,B0p"
 
+            # Define EOS type, for volumic fit
+            if self.eos_type == 'Murnaghan':
+                myeos = eos.murnaghan_EV
+            if self.eos_type == 'Birch-Murnaghan':
+                myeos = eos.birch_murnaghan_EV
 
-            if plot:
-                import matplotlib.pyplot as plt
-                from mpl_toolkits.mplot3d import Axes3D
-
-            # This delta is the difference between real HGH minimum and PAW minimum, at the current pressure
-            if self.pressure_gpa==0.0:
-                delta =  [0.011000356489930141,0.0844492602578999] #for 0gpa
-            if self.pressure_gpa == 0.5:
-                delta = [0.004513105799999195,0.0239153519999995] #for 0.5gpa
-            if self.pressure_gpa == 1.0:
-                delta = [0.0,0.0] #for 1gpa
-            if self.pressure_gpa == 1.5:
-                delta = [0.0031372478999998066,0.001351464000000746] #for 1.5gpa
-            if self.pressure_gpa == 3.0:
-                delta = [0.0,0.0] #for 3gpa
-            if self.pressure_gpa == 3.5:
-                delta = [0.001538456200000482,-0.0026159529999993936] #for 3.5gpa
-            if self.pressure_gpa == 5.0:
-                delta = [0.016926552700000208,-0.0055531139999995816] #for 5gpa
-
-#            print('From free energy minimization')
             for t, T in enumerate(self.temperature):
-                afit = np.polyfit(self.volume[:3,1],self.free_energy[:3,t],2)
-                fit[0,t] = -afit[1]/(2*afit[0])
-                cfit = np.polyfit(self.volume[3:,3],self.free_energy[3:,t],2)
-                fit[1,t] = -cfit[1]/(2*cfit[0])
-
-                
-                fit2, cov2 = leastsq(self.residuals, x0=[afit[0],afit[0],cfit[0],cfit[0],self.free_energy[1,t]], args=(self.volume[:,1],self.volume[:,3],
-                    self.free_energy[:,t]),maxfev=4000)
-                fit2d[:,t] = fit2[0],fit2[2]
- #               print('\nT={}'.format(T))
-                #print(fit2)
-                #print(cov2)
-#                print('independent fit')
-#                print(fit[:,t])
-#                print('2d fit')
-#                print(fit2d[:,t])
-
-                # Fit Gibbs free energy
-                afitg = np.polyfit(self.volume[:3,1],self.gibbs_free_energy[:3,t],2)
-                fitg[0,t] = -afitg[1]/(2*afitg[0])
-                cfitg = np.polyfit(self.volume[3:,3],self.gibbs_free_energy[3:,t],2)
-                fitg[1,t] = -cfitg[1]/(2*cfitg[0])
 
 
-                fit2g, cov2g = leastsq(self.residuals, x0=[afitg[0],afitg[0],cfitg[0],cfitg[0],self.gibbs_free_energy[1,t]], args=(self.volume[:,1],self.volume[:,3],
-                    self.gibbs_free_energy[:,t]),maxfev=4000)
-                fit2dg[:,t] = fit2g[0],fit2g[2]
-#                print('Gibbs')
-            #    print(fitg[:,t]-delta)
-            #    print(fit2dg[:,t]-delta)
-                fitg[:,t] = fitg[:,t]-delta
-                fit2dg[:,t] = fit2dg[:,t]-delta
+                p0 = [self.equilibrium_volume[0],self.free_energy[1,t],self.bulk_modulus,4.0]
+                # define bounds for optimal parameters
+                bounds = [[0.95*self.equilibrium_volume[0],1.08*self.free_energy[1,t],0.1*self.bulk_modulus,0.],
+                                [1.10*self.equilibrium_volume[0],0.95*self.free_energy[1,t],5*self.bulk_modulus,50.]]
 
-#                print(self.gibbs_free_energy[:,t])
-                
+                popt, pcov = curve_fit(myeos, self.volume[:,0], self.free_energy[:,t], p0, bounds=bounds)
+
+                self.eos_fit_params[:,t] = popt
+
+                # Print fitting parameters if required
+                if self.verbose:
+                    print('\n For volumic EOS fit at T = {}K:'.format(T))
+                    print('    Bulk modulus: {:>5.0f} GPa, bulk modulud derivative: {}'.format(popt[2]*cst.habo3_to_gpa, popt[3]))
+                    print('    Covariance matrix: {}'.format(pcov))
+
+            return 
 
 
-
-                if plot:
-                    fig = plt.figure()
-                    arr = fig.add_subplot(111,projection='3d')
-                    arr.plot(self.volume[:3,1],self.volume[:3,3],self.gibbs_free_energy[:3,t],marker='o',color='k',linestyle='None') #at T=0
-                    arr.plot(self.volume[3:,1],self.volume[3:,3],self.gibbs_free_energy[3:,t],marker='o',color='b',linestyle='None') #at T=0
-
-                    xmesh = np.linspace(0.99*self.volume[0,1],1.01*self.volume[2,1],200)
-                    ymesh = np.linspace(0.99*self.volume[3,3],1.01*self.volume[5,3],200)
-                    xmesh,ymesh = np.meshgrid(xmesh,ymesh)
-                    zmesh = self.paraboloid(xmesh,ymesh,p0=fit2g)
-                    zlim = arr.get_zlim3d()
-                    arr.plot_wireframe(xmesh,ymesh,zmesh)
-                    xx = np.ones((10))
-                    arr.plot(fit2dg[0,t]*xx,fit2dg[1,t]*xx,np.linspace(0.99999*zlim[0],1.00001*zlim[1],10),color='magenta',linewidth=2,zorder=3)
-
-                    out='FIG/{}_{}K.png'.format(self.rootname,T)
-                    create_directory(out)
-                    plt.savefig(out)
-                    plt.show()
-                    plt.close()
-
-            self.independent_fit = fit
-            self.fit2d = fit2d 
-            self.fitg = fitg
-            self.fit2dg = fit2dg
-
-            return fit
+#     def minimize_free_energy(self):
+# 
+#         plot = False
+# 
+#         if plot:
+#             import matplotlib.pyplot as plt
+#         
+#         if self.symmetry == 'cubic':
+#             
+#             fit = np.zeros((self.ntemp))
+# 
+#             for t, T in enumerate(self.temperature):
+#                 afit = np.polyfit(self.volume[:,1],self.free_energy[:,t],2)
+#                 fit[t] = -afit[1]/(2*afit[0])
+# 
+#                 if plot:
+#                     xfit = np.linspace(9.50,12.0,100)
+#                     yfit = afit[0]*xfit**2 + afit[1]*xfit + afit[2]
+#                     plt.plot(self.volume[:,1],self.free_energy[:,t],marker='o')
+#                     plt.plot(xfit,yfit)
+# 
+#             if plot:
+#                 plt.show()
+# 
+#             #### ONLY FOR GaAs !!!!! Rescale expansion to experimental parameter
+#         #    fit = fit - np.ones(len(fit))*0.18573269
+# 
+#             fit = np.expand_dims(fit,axis=0)
+#             return fit
+# 
+#         if self.symmetry == 'hexagonal':
+#             
+#             from scipy.optimize import leastsq
+# 
+#             fit = np.zeros((2,self.ntemp))
+#             fit2d = np.zeros((2,self.ntemp))
+#             fitg = np.zeros((2,self.ntemp))
+#             fit2dg = np.zeros((2,self.ntemp))
+# 
+# 
+#             if plot:
+#                 import matplotlib.pyplot as plt
+#                 from mpl_toolkits.mplot3d import Axes3D
+# 
+#             # This delta is the difference between real HGH minimum and PAW minimum, at the current pressure
+#             if self.pressure_gpa==0.0:
+#                 delta =  [0.011000356489930141,0.0844492602578999] #for 0gpa
+#             if self.pressure_gpa == 0.5:
+#                 delta = [0.004513105799999195,0.0239153519999995] #for 0.5gpa
+#             if self.pressure_gpa == 1.0:
+#                 delta = [0.0,0.0] #for 1gpa
+#             if self.pressure_gpa == 1.5:
+#                 delta = [0.0031372478999998066,0.001351464000000746] #for 1.5gpa
+#             if self.pressure_gpa == 3.0:
+#                 delta = [0.0,0.0] #for 3gpa
+#             if self.pressure_gpa == 3.5:
+#                 delta = [0.001538456200000482,-0.0026159529999993936] #for 3.5gpa
+#             if self.pressure_gpa == 5.0:
+#                 delta = [0.016926552700000208,-0.0055531139999995816] #for 5gpa
+# 
+# #            print('From free energy minimization')
+#             for t, T in enumerate(self.temperature):
+#                 afit = np.polyfit(self.volume[:3,1],self.free_energy[:3,t],2)
+#                 fit[0,t] = -afit[1]/(2*afit[0])
+#                 cfit = np.polyfit(self.volume[3:,3],self.free_energy[3:,t],2)
+#                 fit[1,t] = -cfit[1]/(2*cfit[0])
+# 
+#                 
+#                 fit2, cov2 = leastsq(self.residuals, x0=[afit[0],afit[0],cfit[0],cfit[0],self.free_energy[1,t]], args=(self.volume[:,1],self.volume[:,3],
+#                     self.free_energy[:,t]),maxfev=4000)
+#                 fit2d[:,t] = fit2[0],fit2[2]
+#  #               print('\nT={}'.format(T))
+#                 #print(fit2)
+#                 #print(cov2)
+# #                print('independent fit')
+# #                print(fit[:,t])
+# #                print('2d fit')
+# #                print(fit2d[:,t])
+# 
+#                 # Fit Gibbs free energy
+#                 afitg = np.polyfit(self.volume[:3,1],self.gibbs_free_energy[:3,t],2)
+#                 fitg[0,t] = -afitg[1]/(2*afitg[0])
+#                 cfitg = np.polyfit(self.volume[3:,3],self.gibbs_free_energy[3:,t],2)
+#                 fitg[1,t] = -cfitg[1]/(2*cfitg[0])
+# 
+# 
+#                 fit2g, cov2g = leastsq(self.residuals, x0=[afitg[0],afitg[0],cfitg[0],cfitg[0],self.gibbs_free_energy[1,t]], args=(self.volume[:,1],self.volume[:,3],
+#                     self.gibbs_free_energy[:,t]),maxfev=4000)
+#                 fit2dg[:,t] = fit2g[0],fit2g[2]
+# #                print('Gibbs')
+#             #    print(fitg[:,t]-delta)
+#             #    print(fit2dg[:,t]-delta)
+#                 fitg[:,t] = fitg[:,t]-delta
+#                 fit2dg[:,t] = fit2dg[:,t]-delta
+# 
+# #                print(self.gibbs_free_energy[:,t])
+#                 
+# 
+# 
+# 
+#                 if plot:
+#                     fig = plt.figure()
+#                     arr = fig.add_subplot(111,projection='3d')
+#                     arr.plot(self.volume[:3,1],self.volume[:3,3],self.gibbs_free_energy[:3,t],marker='o',color='k',linestyle='None') #at T=0
+#                     arr.plot(self.volume[3:,1],self.volume[3:,3],self.gibbs_free_energy[3:,t],marker='o',color='b',linestyle='None') #at T=0
+# 
+#                     xmesh = np.linspace(0.99*self.volume[0,1],1.01*self.volume[2,1],200)
+#                     ymesh = np.linspace(0.99*self.volume[3,3],1.01*self.volume[5,3],200)
+#                     xmesh,ymesh = np.meshgrid(xmesh,ymesh)
+#                     zmesh = self.paraboloid(xmesh,ymesh,p0=fit2g)
+#                     zlim = arr.get_zlim3d()
+#                     arr.plot_wireframe(xmesh,ymesh,zmesh)
+#                     xx = np.ones((10))
+#                     arr.plot(fit2dg[0,t]*xx,fit2dg[1,t]*xx,np.linspace(0.99999*zlim[0],1.00001*zlim[1],10),color='magenta',linewidth=2,zorder=3)
+# 
+#                     out='FIG/{}_{}K.png'.format(self.rootname,T)
+#                     create_directory(out)
+#                     plt.savefig(out)
+#                     plt.show()
+#                     plt.close()
+# 
+#             self.independent_fit = fit
+#             self.fit2d = fit2d 
+#             self.fitg = fitg
+#             self.fit2dg = fit2dg
+# 
+#             return fit
 
     def paraboloid(self, x,y, p0):
 
@@ -2133,6 +2215,7 @@ class Gruneisen(FreeEnergy):
                 plt.savefig('gruneisen_GaAs2.png')
                 plt.show()
 
+            gru = np.expand_dims(gru, axis=0)
             return gru
 
 
@@ -2381,23 +2464,23 @@ class Gruneisen(FreeEnergy):
             # fix this properly later!!! 
             #cv[0,:3,:] = 0
 
-            alpha = np.einsum('q,qvt,qv->t',self.wtq,cv,self.gruneisen)/(9*self.equilibrium_volume[0]*self.bulk_modulus)
+            alpha = np.einsum('q,qvt,qv->t',self.wtq,cv,self.gruneisen[0, :, :])/(9*self.equilibrium_volume[0]*self.bulk_modulus)
             alphavol=np.einsum('q,qvt,qv->t',self.wtq,cv,self.gruvol)/(self.equilibrium_volume[0]*self.bulk_modulus)
             alpha2 = np.einsum('q,qvt,qv->t',self.wtq,cv,self.gru2)/(self.equilibrium_volume[0]*self.bulk_modulus)
 
 
             # Then, get a(T)
-            integral = 1./(9*self.bulk_modulus*self.equilibrium_volume[0])*np.einsum('q,qvt,qv->t',self.wtq,hwt,self.gruneisen)
+            integral = 1./(9*self.bulk_modulus*self.equilibrium_volume[0])*np.einsum('q,qvt,qv->t',self.wtq,hwt,self.gruneisen[0, :, :])
             a = self.equilibrium_volume[1]*(integral+1)
 
             # Renormalize the a(T=0) with the zero-point energy contribution
-            integral_plushalf = 1./(9*self.bulk_modulus*self.volume[1,0])*np.einsum('q,qvt,qv->t',self.wtq,hwt_plushalf,self.gruneisen)
-            new_acell0 = self.equilibrium_volume[1]*(1+1./(9*self.bulk_modulus*self.equilibrium_volume[0])*np.einsum('q,qv,qv->',self.wtq,self.omega[1,:,:],self.gruneisen)*0.5)
-            print('################ static_acell0 : {} bohr, new_acell0:, {} (bohr)'.format(self.equilibrium_volume[1], new_acell0))
-            print('delta = {} bohr, delta a/a0 stat = {}%'.format(new_acell0-self.equilibrium_volume[1], (new_acell0-self.equilibrium_volume[1])/self.equilibrium_volume[1]*100))
+            integral_plushalf = 1./(9*self.bulk_modulus*self.volume[1,0])*np.einsum('q,qvt,qv->t',self.wtq,hwt_plushalf,self.gruneisen[0, :, :])
+            new_acell0 = self.equilibrium_volume[1]*(1+1./(9*self.bulk_modulus*self.equilibrium_volume[0])*np.einsum('q,qv,qv->',self.wtq,self.omega[1,:,:],self.gruneisen[0, :, :])*0.5)
+            print('################ static_acell0 : {:>7.4f} bohr, new_acell0: {:>7.4f} (bohr)'.format(self.equilibrium_volume[1].round(4), new_acell0.round(4)))
+            print('delta = {:>7.4f} bohr, delta a/a0 stat = {:>6.4f}%'.format(new_acell0-self.equilibrium_volume[1], (new_acell0-self.equilibrium_volume[1]).round(4)/self.equilibrium_volume[1].round(4)*100))
             new_V0 = new_acell0**3/4.
             print('stat V0: {}, newV0: {}'.format(self.equilibrium_volume[0], new_V0))
-            integral_newacell0 = 1./(9*self.bulk_modulus*new_V0)*np.einsum('q,qvt,qv->t',self.wtq,hwt,self.gruneisen)
+            integral_newacell0 = 1./(9*self.bulk_modulus*new_V0)*np.einsum('q,qvt,qv->t',self.wtq,hwt,self.gruneisen[0, :, :])
 
             a_plushalf = new_acell0*(integral+1)
             #a_plushalf = new_acell0*(integral_newacell0+1)
@@ -2492,7 +2575,7 @@ class Gruneisen(FreeEnergy):
         if self.symmetry == 'hexagonal':
             
             
-            plot = True
+            plot = False
 
             if self.verbose:
                 ggg = open('{}_integrals.dat'.format(self.rootname),'w')   
@@ -2565,10 +2648,10 @@ class Gruneisen(FreeEnergy):
             cterm_plushalf = 2*self.compliance[0,2]*integral_aplushalf + self.compliance[2,2]*integral_cplushalf
             cplushalf = self.equilibrium_volume[3]*(cterm_plushalf/self.equilibrium_volume[0] + 1)
 
-            daa_slope = np.polyfit(self.temperature[16:],daa[16:],1)
-            print('Delta a/a intersect: {:>8.5e}, new a0 = {} bohr'.format(daa_slope[1],-daa_slope[1]*self.equilibrium_volume[1]+self.equilibrium_volume[1]))
-            dcc_slope = np.polyfit(self.temperature[16:],dcc[16:],1)
-            print('Delta c/c intersect: {:>8.5e}, new c0 = {} bohr'.format(dcc_slope[1],-dcc_slope[1]*self.equilibrium_volume[3]+self.equilibrium_volume[3]))
+            #daa_slope = np.polyfit(self.temperature[16:],daa[16:],1)
+            #print('Delta a/a intersect: {:>8.5e}, new a0 = {} bohr'.format(daa_slope[1],-daa_slope[1]*self.equilibrium_volume[1]+self.equilibrium_volume[1]))
+            #dcc_slope = np.polyfit(self.temperature[16:],dcc[16:],1)
+            #print('Delta c/c intersect: {:>8.5e}, new c0 = {} bohr'.format(dcc_slope[1],-dcc_slope[1]*self.equilibrium_volume[3]+self.equilibrium_volume[3]))
 
             a2 = (self.compliance_rigid[0,0]+self.compliance[0,1])*integral_a + self.compliance[0,2]*integral_c
             a2 = self.equilibrium_volume[1]*(a2/self.equilibrium_volume[0] + 1)
@@ -2580,8 +2663,24 @@ class Gruneisen(FreeEnergy):
             da0 = ((self.compliance[0,0]+self.compliance[0,1])*integral_a0 + self.compliance[0,2]*integral_c0)/self.equilibrium_volume[0]
             dc0 = (2*self.compliance[0,2]*integral_a0 + self.compliance[2,2]*integral_c0)/self.equilibrium_volume[0]
 
+
+            new_a0 = self.equilibrium_volume[1]*(1 + da0)
+            new_c0 = self.equilibrium_volume[3]*(1 + dc0)
+            aplushalf = new_a0*(aterm/self.equilibrium_volume[0] + 1)
+            cplushalf = new_c0*(cterm/self.equilibrium_volume[0] + 1)
+
+
             acell = np.array([a,c])
             self.acell_plushalf = np.array([aplushalf,cplushalf])
+
+
+            print('############### T=0')
+            #new_acell0 = self.equilibrium_volume[1]*(1+1./(9*self.bulk_modulus*self.equilibrium_volume[0])*np.einsum('q,qv,qv->',self.wtq,self.omega[1,:,:],self.gruneisen)*0.5)
+            print('################ static_acell :a0 = {:>7.4f} bohr, new_a0: {:>7.4f} (bohr)'.format(self.equilibrium_volume[1].round(4), new_a0.round(4)))
+            print('delta a = {:>7.4f} bohr, delta a/a0 stat = {:>6.4f}%'.format(new_a0-self.equilibrium_volume[1], (new_a0-self.equilibrium_volume[1]).round(4)/self.equilibrium_volume[1].round(4)*100))
+
+            print('################ static_acell :c0 = {:>7.4f} bohr, new_c0: {:>7.4f} (bohr)'.format(self.equilibrium_volume[3].round(4), new_c0.round(4)))
+            print('delta c = {:>7.4f} bohr, delta c/c0 stat = {:>6.4f}%'.format(new_c0-self.equilibrium_volume[3], (new_c0-self.equilibrium_volume[3]).round(4)/self.equilibrium_volume[3].round(4)*100))
 
 #            self.acell2 = np.array([a2,c2])
             if self.verbose:
@@ -2791,7 +2890,7 @@ class Gruneisen(FreeEnergy):
 #            for t,T in enumerate(self.temperature):
 #                print('T={}K, a={} ang, c={} ang'.format(T,a[t]*cst.bohr_to_ang,c[t]*cst.bohr_to_ang))
 
-            self.alpha = [alpha_a, alpha_c]
+            self.alpha = np.array([alpha_a, alpha_c])
 
             return acell
 
@@ -3077,7 +3176,10 @@ class Gruneisen(FreeEnergy):
             dts.createDimension('number_of_temperatures', self.ntemp)
             dts.createDimension('number_of_lattice_parameters', len(self.distinct_acell))
             dts.createDimension('one',1)
-#            dts.createDimension('number_of_volumes', np.shape(self.volume)[0])
+            dts.createDimension('four', 4)
+            dts.createDimension('number_of_qpoints', self.gruneisen.shape[1])
+            dts.createDimension('number_of_modes', self.gruneisen.shape[2])
+            dts.createDimension('number_of_volumes', np.shape(self.volume)[0])
 
             data = dts.createVariable('temperature','d', ('number_of_temperatures'))
             data[:] = self.temperature[:]
@@ -3090,6 +3192,14 @@ class Gruneisen(FreeEnergy):
             data = dts.createVariable('acell_from_gruneisen_plushalf','d', ('number_of_lattice_parameters','number_of_temperatures'))
             data[:,:] = self.acell_plushalf[:,:]
             data.units = 'Bohr radius'
+
+            data = dts.createVariable('volume','d', ('number_of_volumes','four'))
+            data[:,:] = self.volume[:,:]
+            data.units = 'bohr^3'
+
+            data = dts.createVariable('equilibrium_volume','d', ('four'))
+            data[:] = self.equilibrium_volume[:]
+            data.units = 'bohr^3'
 
 
 #            data = dts.createVariable('acell_from_helmholtz','d',('number_of_lattice_parameters','number_of_temperatures'))
@@ -3127,6 +3237,15 @@ class Gruneisen(FreeEnergy):
             data = dts.createVariable('specific_heat','d',('number_of_temperatures'))
             data[:] = self.cv
             data.units = 'Ha/K'
+
+            data = dts.createVariable('eos_fit_parameters', 'd', ('four','number_of_temperatures'))
+            if self.symmetry == 'hexagonal':
+                data[:,:] = self.eos_fit_params[:,:]
+                data.units = "V0,E0,B0,B0p"
+                data.description = self.eos_type
+
+            data = dts.createVariable('gruneisen_parameters', 'd', ('number_of_lattice_parameters', 'number_of_qpoints', 'number_of_modes'))
+            data[:, :, :] = self.gruneisen[:, :, :]
 
 
 
@@ -3169,40 +3288,41 @@ class Gruneisen(FreeEnergy):
 
                 f.close()
 
-        # Write also results from Free energy minimisation
-        outfile = 'OUT/{}_acell_from_freeenergy.dat'.format(self.rootname)
-
-        create_directory(outfile)
-
-        with open(outfile, 'w') as f:
-
-            f.write('Temperature dependent lattice parameters via Helmholtz free energy\n\n')
-
-            if self.symmetry == 'cubic':
-
-
-                f.write('{:12}    {:12}\n'.format('Temperature','a (bohr)'))
-                for t,T in enumerate(self.temperature):
-                    f.write('{:>8.1f} K    {:>12.8f}\n'.format(T,self.temperature_dependent_acell[0,t]))
-
-                f.close()
-
-
-            if self.symmetry == 'hexagonal':
-
-                f.write('{:12}      {:<12}    {:<12}\n'.format('Temperature','a (bohr)','c (bohr)'))
-                for t,T in enumerate(self.temperature):
-                    f.write('{:>8.1f} K    {:>12.8f}    {:>12.8f}\n'.format(T,self.fit2d[0,t],self.fit2d[1,t]))
-
-                # Independent fit: fitg, 2D fit: fit2dg
-                f.write('\n\nTemperature dependent lattice parameters via Gibbs free energy\n\n')
-                f.write('{:12}      {:<12}    {:<12}\n'.format('Temperature','a (bohr)','c (bohr)'))
-                for t,T in enumerate(self.temperature):
-                    f.write('{:>8.1f} K    {:>12.8f}    {:>12.8f}\n'.format(T,self.fitg[0,t],self.fitg[1,t]))
-
-
-
-                f.close()
+#         # Write also results from Free energy minimisation
+#         # This makes no sense, as it cannot work for 3 input points only. It is more properly done using Gibbs class.
+#         outfile = 'OUT/{}_acell_from_freeenergy.dat'.format(self.rootname)
+# 
+#         create_directory(outfile)
+# 
+#         with open(outfile, 'w') as f:
+# 
+#             f.write('Temperature dependent lattice parameters via Helmholtz free energy\n\n')
+# 
+#             if self.symmetry == 'cubic':
+# 
+# 
+#                 f.write('{:12}    {:12}\n'.format('Temperature','a (bohr)'))
+#                 for t,T in enumerate(self.temperature):
+#                     f.write('{:>8.1f} K    {:>12.8f}\n'.format(T,self.temperature_dependent_acell[0,t]))
+# 
+#                 f.close()
+# 
+# 
+#             if self.symmetry == 'hexagonal':
+# 
+#                 f.write('{:12}      {:<12}    {:<12}\n'.format('Temperature','a (bohr)','c (bohr)'))
+#                 for t,T in enumerate(self.temperature):
+#                     f.write('{:>8.1f} K    {:>12.8f}    {:>12.8f}\n'.format(T,self.fit2d[0,t],self.fit2d[1,t]))
+# 
+#                 # Independent fit: fitg, 2D fit: fit2dg
+#                 f.write('\n\nTemperature dependent lattice parameters via Gibbs free energy\n\n')
+#                 f.write('{:12}      {:<12}    {:<12}\n'.format('Temperature','a (bohr)','c (bohr)'))
+#                 for t,T in enumerate(self.temperature):
+#                     f.write('{:>8.1f} K    {:>12.8f}    {:>12.8f}\n'.format(T,self.fitg[0,t],self.fitg[1,t]))
+# 
+# 
+# 
+#                 f.close()
 
 
 class Static(object):
@@ -3540,6 +3660,9 @@ def compute(
 
                     manual_correction = manual_correction,
                     verbose = verbose,
+
+                    eos_type = eos_type,
+
                     **kwargs)
 
 
