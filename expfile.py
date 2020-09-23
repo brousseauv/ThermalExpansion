@@ -26,5 +26,3 @@ class EXPfile(EpcFile):
             self.ndata = len(self.xaxis)
             self.xaxis_units = ncdata.variables['ax1'].getncattr('units')
             self.yaxis_units = ncdata.variables['ax2'].getncattr('units')
-
-
