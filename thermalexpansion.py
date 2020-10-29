@@ -1546,7 +1546,7 @@ class Gruneisen(FreeEnergy):
                 nmode = 3*gs.natom
                 self.natom = gs.natom
                 self.omega = np.zeros((nvol,nqpt,nmode))
-
+                self.eigvect = np.zeros((nvol, nqpt, nmode, nmode), dtype=complex)
             # get E
             E = gs.etotal[0]
 
@@ -1575,262 +1575,10 @@ class Gruneisen(FreeEnergy):
                 else:
                     ddb.compute_dynmat()
                         ##### CHECK WITH GABRIEL IF I SHOULD HAVE LOTO SPLITTING AT GAMMA (WHERE DOES HIS CODE TREAT THE ELECTRIC FIELD PERTURBAITON IN THE DDB AT GAMMA???)
+                        ### I should maybe implement the proper ASR corrections, like in anaddb and phonopy...
 
                 # Store frequencies for Gruneisen parameters
-#                print(v+1,i+1,ddb.omega)
                 self.omega[v,i,:] = ddb.omega
-#                if v==1:
-#                    print(i+1,ddb.omega)
-#
-#                    # Manual correction for 0.0gpa
-#                    if i+1==26:
-#                        self.omega[v,i,0] = 0.2854956226E-04
-#                        self.omega[v,i,1] = 0.2854956226E-04
-#                    if i+1==56:
-#                        self.omega[v,i,0] = 0.3932015304E-04
-#                        self.omega[v,i,1] = 0.3932015304E-04
-
-
-#                    # Manual correction for 0.5gpa
-#                    if i+1==26:
-#                        self.omega[v,i,0] = 0.4283688046E-04
-#                        self.omega[v,i,1] = 0.4283688046E-04
-#                    if i+1==56:
-#                        self.omega[v,i,0] = 0.5818795222E-04
-#                        self.omega[v,i,1] = 0.5818795222E-04
-
-#                    # Manual correction for 1gpa
-#                    if i+1==26:
-#                        self.omega[v,i,0] = 0.5350676926E-04
-#                        self.omega[v,i,1] = 0.5350676926E-04
-
-                '''Manual corrections for ""negative"" frequencies in the DDB along Gamma-A, NOT in phonon dispersion...'''
-                if self.manual_correction:
-                    if v==1:
-                        if i==0:
-                            print('Manually correcting some frequencies for BiTeI. Make sure it should be done!')
-
-                        if self.pressure_gpa == 0.0:
-                            if i+1==26:
-                                self.omega[v,i,0] = 0.2854956226E-04
-                                self.omega[v,i,1] = 0.2854956226E-04
-                            if i+1==56:
-                                self.omega[v,i,0] = 0.3932015304E-04
-                                self.omega[v,i,1] = 0.3932015304E-04
-
-                        if self.pressure_gpa == 0.5:
-                           if i+1==26:
-                               self.omega[v,i,0] = 0.4283688046E-04
-                               self.omega[v,i,1] = 0.4283688046E-04
-                           if i+1==56:
-                               self.omega[v,i,0] = 0.5818795222E-04
-                               self.omega[v,i,1] = 0.5818795222E-04
-
-                        if self.pressure_gpa == 1.0:
-                            if i+1==26:
-                                self.omega[v,i,0] = 0.5350676926E-04
-                                self.omega[v,i,1] = 0.5350676926E-04
-
-                    if self.pressure_gpa==5.0:
-                        '''Correcting an inversion of 2 phonon branches'''
-                        if i+1==11:
-                            if v!=2 and v!=5: #the 'plus' volumes are not inverted yet
-                                print('Inverting modes 6,7-8 for qpt 11')
-                                tmp = self.omega[v,i,7] #mode index 6 is now at position 8
-                                self.omega[v,i,7] = self.omega[v,i,6]
-                                self.omega[v,i,6] = self.omega[v,i,5]
-                                self.omega[v,i,5] = tmp
-
-
-                if self.manual_correction==True:
-
-                    if self.pressure_gpa==0.0:
-
-                        if v==0:
-                            if i+1==11:
-                                self.omega[v,i,0] = 0.1701677510E-04
-                                self.omega[v,i,1] = 0.1701677510E-04
-                            if i+1==26:
-                                self.omega[v,i,0] = 0.3081052709E-04
-                                self.omega[v,i,1] = 0.3081052709E-04
-                            if i+1==41:
-                                self.omega[v,i,0] = 0.3951433427E-04
-                                self.omega[v,i,1] = 0.3951433427E-04
-                            if i+1==56:
-                                self.omega[v,i,0] = 0.4246114942E-04
-                                self.omega[v,i,1] = 0.4246114942E-04
-    
-                           
-                        if v==2:
-                            if i+1==11:
-                                self.omega[v,i,0] = 0.1445752629E-04
-                                self.omega[v,i,1] = 0.1445752629E-04
-                            if i+1==26:
-                                self.omega[v,i,0] = 0.2615837711E-04
-                                self.omega[v,i,1] = 0.2615837711E-04
-                            if i+1==41:
-                                self.omega[v,i,0] = 0.3352045144E-04
-                                self.omega[v,i,1] = 0.3352045144E-04
-                            if i+1==56:
-                                self.omega[v,i,0] = 0.3600703695E-04
-                                self.omega[v,i,1] = 0.3600703695E-04
-    
-                        if v==3:
-                            if i+1==11:
-                                self.omega[v,i,0] = 0.1844002580E-04
-                                self.omega[v,i,1] = 0.1844002580E-04
-                            if i+1==26:
-                                self.omega[v,i,0] =0.3321005229E-04 
-                                self.omega[v,i,1] = 0.3321005229E-04
-                            if i+1==41:
-                                self.omega[v,i,0] = 0.4239809330E-04
-                                self.omega[v,i,1] = 0.4239809330E-04
-                            if i+1==56:
-                                self.omega[v,i,0] = 0.4548321391E-04
-                                self.omega[v,i,1] = 0.4548321391E-04
-    
-                        if v==5:
-                            if i+1==11:
-                                self.omega[v,i,0] = 0.1329674604E-04
-                                self.omega[v,i,1] = 0.1329674604E-04
-                            if i+1==26:
-                                self.omega[v,i,0] = 0.2417267515E-04
-                                self.omega[v,i,1] = 0.2417267515E-04
-                            if i+1==41:
-                                self.omega[v,i,0] = 0.3110661810E-04
-                                self.omega[v,i,1] = 0.3110661810E-04
-                            if i+1==56:
-                                self.omega[v,i,0] = 0.3346756983E-04
-                                self.omega[v,i,1] = 0.3346756983E-04
-    
-                    if self.pressure_gpa==0.5:
-
-                        if v==2:
-                            if i+1==11:
-                                self.omega[v,i,0] = 0.2238287077E-04
-                                self.omega[v,i,1] = 0.2238287077E-04
-                            if i+1==26:
-                                self.omega[v,i,0] = 0.3991101016E-04
-                                self.omega[v,i,1] = 0.3991101016E-04
-                            if i+1==41:
-                                self.omega[v,i,0] = 0.5055067226E-04
-                                self.omega[v,i,1] = 0.5055067226E-04
-                            if i+1==56:
-                                self.omega[v,i,0] = 0.5407840848E-04
-                                self.omega[v,i,1] = 0.5407840848E-04
-    
-                        if v==3:
-                            if i+1==11:
-                                self.omega[v,i,0] = 0.2778743747E-04
-                                self.omega[v,i,1] = 0.2778743747E-04
-                            if i+1==26:
-                                self.omega[v,i,0] = 0.4923183936E-04
-                                self.omega[v,i,1] = 0.4923183936E-04
-                            if i+1==41:
-                                self.omega[v,i,0] = 0.6209346782E-04
-                                self.omega[v,i,1] = 0.6209346782E-04
-                            if i+1==56:
-                                self.omega[v,i,0] = 0.6634359246E-04
-                                self.omega[v,i,1] = 0.6634359246E-04
-    
-                        if v==5:
-                            if i+1==11:
-                                self.omega[v,i,0] = 0.2088010115E-04
-                                self.omega[v,i,1] = 0.2088010115E-04
-                            if i+1==26:
-                                self.omega[v,i,0] = 0.3749295751E-04
-                                self.omega[v,i,1] = 0.3749295751E-04
-                            if i+1==41:
-                                self.omega[v,i,0] = 0.4775718968E-04
-                                self.omega[v,i,1] = 0.4775718968E-04
-                            if i+1==56:
-                                self.omega[v,i,0] = 0.5119297864E-04
-                                self.omega[v,i,1] = 0.5119297864E-04
-    
-                    if self.pressure_gpa==1.0:
-
-    
-                        if v==2:
-                            if i+1==11:
-                                self.omega[v,i,0] = 0.2815987569E-04
-                                self.omega[v,i,1] = 0.2815987569E-04
-                            if i+1==26:
-                                self.omega[v,i,0] = 0.4973369845E-04
-                                self.omega[v,i,1] = 0.4973369845E-04
-    
-                        if v==3:
-                            if i+1==11:
-                                self.omega[v,i,0] = 0.3428041003E-04
-                                self.omega[v,i,1] = 0.3428041003E-04
-                            if i+1==26:
-                                self.omega[v,i,0] = 0.6015751069E-04
-                                self.omega[v,i,1] = 0.6015751069E-04
-    
-                        if v==5:
-                            if i+1==11:
-                                self.omega[v,i,0] = 0.2648013493E-04
-                                self.omega[v,i,1] = 0.2648013493E-04
-                            if i+1==26:
-                                self.omega[v,i,0] = 0.4713674353E-04
-                                self.omega[v,i,1] = 0.4713674353E-04
-                            if i+1==41:
-                                self.omega[v,i,0] = 0.5965927239E-04
-                                self.omega[v,i,1] = 0.5965927239E-04
-    
-                    if self.pressure_gpa==1.5:
-
-                        if v==2:
-                            if i+1==2:
-                                self.omega[v,i,0] = 0.5814735552E-04
-                                self.omega[v,i,1] = 0.5814735552E-04
-                            if i+1==11:
-                                self.omega[v,i,0] = 0.3238672157E-04
-                                self.omega[v,i,1] = 0.3238672157E-04
-                            if i+1==12:
-                                self.omega[v,i,0] = 0.5532461151E-04
-                                self.omega[v,i,1] = 0.5532461151E-04
-                            if i+1==26:
-                                self.omega[v,i,0] = 0.5684947723E-04
-                                self.omega[v,i,1] = 0.5684947723E-04
-                            if i+1==27:
-                                self.omega[v,i,0] = 0.7044317796E-04
-                                self.omega[v,i,1] = 0.7044317796E-04
-                            if i+1==56:
-                                self.omega[v,i,0] = 0.7600999877E-04
-                                self.omega[v,i,1] = 0.7600999877E-04
- 
-                    if self.pressure_gpa==3.0:
-                        print('Nothing to correct for 3gpa')
-
-                    if self.pressure_gpa==3.5:
-   
-                        if v==0:
-                            if i+1==11:
-                                self.omega[v,i,0] = 0.4887612352E-04
-                                self.omega[v,i,1] = 0.4887612352E-04
-                        if v==2:
-                            if i+1==11:
-                                self.omega[v,i,0] = 0.4381904328E-04
-                                self.omega[v,i,1] = 0.4381904328E-04
-                        if v==3:
-                            if i+1==11:
-                                self.omega[v,i,0] = 0.5084486714E-04
-                                self.omega[v,i,1] = 0.5084486714E-04
-                        if v==5:
-                            if i+1==11:
-                                self.omega[v,i,0] = 0.4189340357E-04
-                                self.omega[v,i,1] = 0.4189340357E-04
-    
-                    if self.pressure_gpa==5.0:
-                        if v==0:
-                            if i+1==11:
-                                self.omega[v,i,0] = 0.5452165665E-04
-                                self.omega[v,i,1] = 0.5452165665E-04
-                        if v==5:
-                            if i+1==11:
-                                self.omega[v,i,0] = 0.4742930451E-04
-                                self.omega[v,i,1] = 0.4742930451E-04
-                     
 
                 # get F0 contribution
                 F_0 += self.wtq[i]*self.get_f0(ddb.omega) 
@@ -1857,9 +1605,9 @@ class Gruneisen(FreeEnergy):
         ''' Fit Murnaghan EOS for Ftot(V) at each T, to get the 'real' P I must add for the Gibbs free energy'''
         if self.verbose:
             for t,T in enumerate(self.temperature):
-                print('T={} K'.format(T))
+                print('For T={} K'.format(T))
                 print(self.gibbs_free_energy[:,t])
-                print('minimal value has index {}'.format(np.argmin(self.gibbs_free_energy[:,t])))
+                print('Minimal Gibbs free energy has index {}'.format(np.argmin(self.gibbs_free_energy[:,t])))
                 print('sorted order: {}'.format(self.gibbs_free_energy[:,t].argsort()))   
 
 
@@ -1908,31 +1656,38 @@ class Gruneisen(FreeEnergy):
 
 
 
-        # Minimize F, according to crystal symmetry
+        # Get Gruneisen parameters and alpha, according to crystal symmetry
 
         ### Add a check for homogenious acell increase (for central finite difference)
         self.equilibrium_volume = self.volume[1,:]
-#        print('before free energy')
-#        self.temperature_dependent_acell = self.minimize_free_energy()
-#        print('after free energy')
         self.minimize_free_energy_from_eos()
 
 
         self.gruneisen = self.get_gruneisen(nqpt,nmode,nvol)
+        self.gruneisen_from_dynmat = self.get_gruneisen_from_dynmat(nqpt,nmode,nvol)
+
         self.acell_via_gruneisen = self.get_acell(nqpt,nmode)
+        self.acell_via_gruneisen_from_dynmat = self.get_acell_from_dynmat(nqpt,nmode)
+
+        # FIX ME: add a variable for the reference temperature, and make this computation optional
         self.discrete_room_temp_alpha = self.discrete_alpha_vs_reftemp(self.acell_via_gruneisen, 293.)
         self.discrete_alpha = self.discrete_alpha_vs_reftemp(self.acell_via_gruneisen, 0.)
         self.room_temp_alpha= self.get_alpha_vs_reftemp(self.acell_via_gruneisen, 293.)
-#        self.effective_phonon_pressure = self.get_phonon_effective_pressure(nqpt,nmode)
         
-# add a function to get the grüneisen mode parameters. This will require to store the frequencies for computation after all volumes have been read and analysed.
-# for the Gruneisen, I need the derivative od the frequencies vs volume.
 
     def minimize_free_energy_from_eos(self):
         # Minimize_free_energy, with an EOS, to obtain the fitting parameters E0, V0, B0, B0'
+        # When done in the Gruneisen class, the purpose is mainly to extract B0(T)
         # Volumic fit only as fitting with (a_0, c_0) is not stable
+        # Not available for cubic symmetry, as there are not enough volumes present.
 
         if self.symmetry == 'cubic':
+
+            if self.verbose:
+                print('Free energy will not be minimized, as there are not enough volumes.')
+                
+              # Keep the code for now, maybe I could add it back it I implement the finite
+              # difference with more than 3 volumes
 
 #             # Define EOS type, for volumic fit
 #             if self.eos_type == 'Murnaghan':
@@ -1991,134 +1746,8 @@ class Gruneisen(FreeEnergy):
             return 
 
 
-#     def minimize_free_energy(self):
-# 
-#         plot = False
-# 
-#         if plot:
-#             import matplotlib.pyplot as plt
-#         
-#         if self.symmetry == 'cubic':
-#             
-#             fit = np.zeros((self.ntemp))
-# 
-#             for t, T in enumerate(self.temperature):
-#                 afit = np.polyfit(self.volume[:,1],self.free_energy[:,t],2)
-#                 fit[t] = -afit[1]/(2*afit[0])
-# 
-#                 if plot:
-#                     xfit = np.linspace(9.50,12.0,100)
-#                     yfit = afit[0]*xfit**2 + afit[1]*xfit + afit[2]
-#                     plt.plot(self.volume[:,1],self.free_energy[:,t],marker='o')
-#                     plt.plot(xfit,yfit)
-# 
-#             if plot:
-#                 plt.show()
-# 
-#             #### ONLY FOR GaAs !!!!! Rescale expansion to experimental parameter
-#         #    fit = fit - np.ones(len(fit))*0.18573269
-# 
-#             fit = np.expand_dims(fit,axis=0)
-#             return fit
-# 
-#         if self.symmetry == 'hexagonal':
-#             
-#             from scipy.optimize import leastsq
-# 
-#             fit = np.zeros((2,self.ntemp))
-#             fit2d = np.zeros((2,self.ntemp))
-#             fitg = np.zeros((2,self.ntemp))
-#             fit2dg = np.zeros((2,self.ntemp))
-# 
-# 
-#             if plot:
-#                 import matplotlib.pyplot as plt
-#                 from mpl_toolkits.mplot3d import Axes3D
-# 
-#             # This delta is the difference between real HGH minimum and PAW minimum, at the current pressure
-#             if self.pressure_gpa==0.0:
-#                 delta =  [0.011000356489930141,0.0844492602578999] #for 0gpa
-#             if self.pressure_gpa == 0.5:
-#                 delta = [0.004513105799999195,0.0239153519999995] #for 0.5gpa
-#             if self.pressure_gpa == 1.0:
-#                 delta = [0.0,0.0] #for 1gpa
-#             if self.pressure_gpa == 1.5:
-#                 delta = [0.0031372478999998066,0.001351464000000746] #for 1.5gpa
-#             if self.pressure_gpa == 3.0:
-#                 delta = [0.0,0.0] #for 3gpa
-#             if self.pressure_gpa == 3.5:
-#                 delta = [0.001538456200000482,-0.0026159529999993936] #for 3.5gpa
-#             if self.pressure_gpa == 5.0:
-#                 delta = [0.016926552700000208,-0.0055531139999995816] #for 5gpa
-# 
-# #            print('From free energy minimization')
-#             for t, T in enumerate(self.temperature):
-#                 afit = np.polyfit(self.volume[:3,1],self.free_energy[:3,t],2)
-#                 fit[0,t] = -afit[1]/(2*afit[0])
-#                 cfit = np.polyfit(self.volume[3:,3],self.free_energy[3:,t],2)
-#                 fit[1,t] = -cfit[1]/(2*cfit[0])
-# 
-#                 
-#                 fit2, cov2 = leastsq(self.residuals, x0=[afit[0],afit[0],cfit[0],cfit[0],self.free_energy[1,t]], args=(self.volume[:,1],self.volume[:,3],
-#                     self.free_energy[:,t]),maxfev=4000)
-#                 fit2d[:,t] = fit2[0],fit2[2]
-#  #               print('\nT={}'.format(T))
-#                 #print(fit2)
-#                 #print(cov2)
-# #                print('independent fit')
-# #                print(fit[:,t])
-# #                print('2d fit')
-# #                print(fit2d[:,t])
-# 
-#                 # Fit Gibbs free energy
-#                 afitg = np.polyfit(self.volume[:3,1],self.gibbs_free_energy[:3,t],2)
-#                 fitg[0,t] = -afitg[1]/(2*afitg[0])
-#                 cfitg = np.polyfit(self.volume[3:,3],self.gibbs_free_energy[3:,t],2)
-#                 fitg[1,t] = -cfitg[1]/(2*cfitg[0])
-# 
-# 
-#                 fit2g, cov2g = leastsq(self.residuals, x0=[afitg[0],afitg[0],cfitg[0],cfitg[0],self.gibbs_free_energy[1,t]], args=(self.volume[:,1],self.volume[:,3],
-#                     self.gibbs_free_energy[:,t]),maxfev=4000)
-#                 fit2dg[:,t] = fit2g[0],fit2g[2]
-# #                print('Gibbs')
-#             #    print(fitg[:,t]-delta)
-#             #    print(fit2dg[:,t]-delta)
-#                 fitg[:,t] = fitg[:,t]-delta
-#                 fit2dg[:,t] = fit2dg[:,t]-delta
-# 
-# #                print(self.gibbs_free_energy[:,t])
-#                 
-# 
-# 
-# 
-#                 if plot:
-#                     fig = plt.figure()
-#                     arr = fig.add_subplot(111,projection='3d')
-#                     arr.plot(self.volume[:3,1],self.volume[:3,3],self.gibbs_free_energy[:3,t],marker='o',color='k',linestyle='None') #at T=0
-#                     arr.plot(self.volume[3:,1],self.volume[3:,3],self.gibbs_free_energy[3:,t],marker='o',color='b',linestyle='None') #at T=0
-# 
-#                     xmesh = np.linspace(0.99*self.volume[0,1],1.01*self.volume[2,1],200)
-#                     ymesh = np.linspace(0.99*self.volume[3,3],1.01*self.volume[5,3],200)
-#                     xmesh,ymesh = np.meshgrid(xmesh,ymesh)
-#                     zmesh = self.paraboloid(xmesh,ymesh,p0=fit2g)
-#                     zlim = arr.get_zlim3d()
-#                     arr.plot_wireframe(xmesh,ymesh,zmesh)
-#                     xx = np.ones((10))
-#                     arr.plot(fit2dg[0,t]*xx,fit2dg[1,t]*xx,np.linspace(0.99999*zlim[0],1.00001*zlim[1],10),color='magenta',linewidth=2,zorder=3)
-# 
-#                     out='FIG/{}_{}K.png'.format(self.rootname,T)
-#                     create_directory(out)
-#                     plt.savefig(out)
-#                     plt.show()
-#                     plt.close()
-# 
-#             self.independent_fit = fit
-#             self.fit2d = fit2d 
-#             self.fitg = fitg
-#             self.fit2dg = fit2dg
-# 
-#             return fit
-
+    # Clean up which functions are really necessary in this class. 
+    # If they may be used by any class, move them to the global class
     def paraboloid(self, x,y, p0):
 
         a0 = p0[0]
@@ -2138,12 +1767,6 @@ class Gruneisen(FreeEnergy):
 
     def get_gruneisen(self, nqpt, nmode,nvol):
 
-        plot = False
-
-        if plot :
-            import matplotlib.pyplot as plt
-            fig,arr = plt.subplots(1,2,figsize = (8,6), sharey = False,squeeze=False)
-
         if self.symmetry == 'cubic':
             
             gru = np.zeros((nqpt,nmode))
@@ -2155,14 +1778,12 @@ class Gruneisen(FreeEnergy):
                 # put Gruneisen at zero for acoustic modes at Gamma
                     gru[q,v] = 0
                 else:
-#                    gru[q,v] = -1*np.polyfit(np.log(self.volume[:,1]), np.log(self.omega[:,q,v]),1)[0]
                     # This is the LINEAR gruneisen parameters
-#                    gru[q,v] = -self.equilibrium_volume[1]/self.omega[1,q,v]*np.polyfit(self.volume[:,1],self.omega[:,q,v],1)[0]
                     gru[q,v] = -self.equilibrium_volume[1]/self.omega[1,q,v]*(self.omega[2,q,v]-self.omega[0,q,v])/(self.volume[2,1]-self.volume[0,1])
 
                     # This is the VOLUMIC one (that is, gru(linear)/3)
                     self.gruvol[q,v] = -self.equilibrium_volume[0]/self.omega[1,q,v]*np.polyfit(self.volume[:,0],self.omega[:,q,v],1)[0]
-              
+
             # correct divergence at q-->0
             # this would extrapolate Gruneisen at q=0 from neighboring qpts
             #x = [np.linalg.norm(self.qred[1,:]),np.linalg.norm(self.qred[2,:])]
@@ -2170,52 +1791,8 @@ class Gruneisen(FreeEnergy):
             #    y = [gru[1,v],gru[2,v]]
             #    gru[0,v] = np.polyfit(x,y,1)[1]
             
-            gru2 = self.gruneisen_from_dynmat(nqpt,nmode,nvol)
-            self.gru2 = gru2
-
-
-            # get the effective pressure from phonons, for a given temperature
-
-
-            #print('slope')
-            #print('delta omega {}'.format(self.omega[2,1,:]-self.omega[0,1,:]))
-            #print('omega0 {}'.format(self.omega[1,1,:]))
-            #print('gruneisen {}'.format(gru[1,:]))
-            if plot :
-                #x = np.array([1,2,3])
-                #x = [np.linalg.norm(self.qred[0,:]),np.linalg.norm(self.qred[1,:]),np.linalg.norm(self.qred[2,:]),np.linalg.norm(self.qred[3,:])]
-                #for v in range(nmode):
-                #    plt.plot(x,gru[:4,:],marker='o')
-                
-                # plot mode Gruneisen vs frequency
-                col = ['red','orange','yellow','green','blue','purple']
-                for v in range(nmode):
-                    arr[0][0].plot(self.omega[1,:,v]*cst.ha_to_ev*1000,gru[:,v],color=col[v],marker = 'o',linestyle='None')
-                    arr[0][0].set_xlabel('Frequency (meV)')
-                    arr[0][0].set_ylabel('Mode Gruneisen')
-
-                    arr[0][1].plot(self.omega[1,:,v]*cst.ha_to_ev*1000,gru2[:,v],color=col[v],marker = 'o',linestyle='None')
-                    arr[0][1].set_xlabel('Frequency (meV)')
-                    arr[0][1].set_ylabel('Mode Gruneisen')
-                    arr[0][0].set_title(r'Slope $\omega$ vs V') 
-                    arr[0][1].set_title(r'Dynamical matrix') 
-                    arr[0][0].plot(self.omega[1,0,v]*cst.ha_to_ev*1000,gru[0,v],marker='d',color='black',linestyle='None')
-                    arr[0][0].plot(self.omega[1,16,v]*cst.ha_to_ev*1000,gru[16,v],marker='s',color='black',linestyle='None')
-                    arr[0][0].grid(b=True, which='major')
-
-
-
-#            if plot:
-#                for c in range(nqpt): 
-#                    for i in range(nmode/2):
-#                        plt.plot(np.log(self.volume[:,1]),np.log(self.omega[:,c,i]),marker='x')
-#                        plt.xlabel('ln V')
-#                        plt.ylabel('ln omega')
-
-                plt.savefig('gruneisen_GaAs2.png')
-                plt.show()
-
             gru = np.expand_dims(gru, axis=0)
+
             return gru
 
 
@@ -2223,8 +1800,11 @@ class Gruneisen(FreeEnergy):
             
             gru = np.zeros((2,nqpt,nmode)) # Gru_a, Gru_c
             self.gru_vol = np.zeros((nqpt,nmode))
+            # FIX ME: what ios gru2?!?
             gru2 = np.zeros((2,nqpt,nmode)) #withfinite difference, on the frequencies
 
+            # FIX ME: these were custom for BiTeI, no need for it in the master version
+            # or, add it in a function, that can be called if necessary
             nlarge = np.zeros((2)) #remove after testing large Gruneisens
             large_a = []
             large_c = []
@@ -2375,61 +1955,6 @@ class Gruneisen(FreeEnergy):
             self.gru2 = gru2
 #            print(gru_tot[0,3:])
 
-
-            if plot :
-                #x = np.array([1,2,3])
-                #x = [np.linalg.norm(self.qred[0,:]),np.linalg.norm(self.qred[1,:]),np.linalg.norm(self.qred[2,:]),np.linalg.norm(self.qred[3,:])]
-                #for v in range(nmode):
-                #    plt.plot(x,gru[:4,:],marker='o')
-                
-                # plot mode Gruneisen vs frequency
-                col = ['red','orange','yellow','green','blue','purple','pink','gray','black','orange','cyan','magenta']
-                for v in range(nmode):
-                    arr[0][0].plot(self.omega[1,:,v]*cst.ha_to_ev*1000,gru[0,:,v],color=col[v],marker = 'o',linestyle='None')
-                    arr[0][0].set_xlabel('Frequency (meV)')
-                    arr[0][0].set_ylabel(r'Mode Gruneisen, $\gamma^a$')
-
-                    arr[0][1].plot(self.omega[1,:,v]*cst.ha_to_ev*1000,gru[1,:,v],color=col[v],marker = 'o',linestyle='None')
-                    arr[0][1].set_xlabel('Frequency (meV)')
-                    arr[0][1].set_ylabel(r'Mode Gruneisen, $\gamma^c$')
-#                    arr[0][0].plot(self.omega[1,0,v]*cst.ha_to_ev*1000,gru[0,v],marker='d',color='black',linestyle='None')
-#                    arr[0][0].plot(self.omega[1,16,v]*cst.ha_to_ev*1000,gru[16,v],marker='s',color='black',linestyle='None')
-                    arr[0][0].grid(b=True, which='major')
-                    arr[0][1].grid(b=True, which='major')
-                    arr[0][0].set_ylim(-5,5)
-                    arr[0][1].set_ylim(-5,5)
-
-#                    #with linear fit
-#                    arr[1][0].plot(self.omega[1,:,v]*cst.ha_to_ev*1000,gru2[0,:,v],color=col[v],marker = 'o',linestyle='None')
-#                    arr[1][0].set_xlabel('Frequency (meV)')
-#                    arr[1][0].set_ylabel(r'Mode Gruneisen, $\gamma^a$')
-#
-#                    arr[1][1].plot(self.omega[1,:,v]*cst.ha_to_ev*1000,gru2[1,:,v],color=col[v],marker = 'o',linestyle='None')
-#                    arr[1][1].set_xlabel('Frequency (meV)')
-#                    arr[1][1].set_ylabel('Mode Gruneisen, $\gamma^c$')
-##                    arr[0][0].set_title(r'Slope $\omega$ vs V') 
-##                    arr[0][1].set_title(r'Dynamical matrix') 
-##                    arr[0][0].plot(self.omega[1,0,v]*cst.ha_to_ev*1000,gru[0,v],marker='d',color='black',linestyle='None')
-##                    arr[0][0].plot(self.omega[1,16,v]*cst.ha_to_ev*1000,gru[16,v],marker='s',color='black',linestyle='None')
-#                    arr[1][0].grid(b=True, which='major')
-#                    arr[1][1].grid(b=True, which='major')
-
-
-#            if plot:
-#                for c in range(nqpt): 
-#                    for i in range(nmode/2):
-#                        plt.plot(np.log(self.volume[:,1]),np.log(self.omega[:,c,i]),marker='x')
-#                        plt.xlabel('ln V')
-#                        plt.ylabel('ln omega')
-                
-                plt.suptitle('{}'.format(self.rootname))
-
-                outfile = 'FIG/gruneisen_{}.png'.format(self.rootname)
-                create_directory(outfile)
-
-                plt.savefig(outfile)
-                plt.show()
-
             return gru 
 
 #
@@ -2466,7 +1991,7 @@ class Gruneisen(FreeEnergy):
 
             alpha = np.einsum('q,qvt,qv->t',self.wtq,cv,self.gruneisen[0, :, :])/(9*self.equilibrium_volume[0]*self.bulk_modulus)
             alphavol=np.einsum('q,qvt,qv->t',self.wtq,cv,self.gruvol)/(self.equilibrium_volume[0]*self.bulk_modulus)
-            alpha2 = np.einsum('q,qvt,qv->t',self.wtq,cv,self.gru2)/(self.equilibrium_volume[0]*self.bulk_modulus)
+            #alpha2 = np.einsum('q,qvt,qv->t',self.wtq,cv,self.gru2[0, :, :])/(self.equilibrium_volume[0]*self.bulk_modulus)
 
 
             # Then, get a(T)
@@ -2696,7 +2221,7 @@ class Gruneisen(FreeEnergy):
 
                 ggg.close()
 
-            print('From Gruneisen parameters')
+            print('From Gruneisen parameters, using phonon frequencies')
             print('da/a at T=0 = {}, da = {} bohr, a0 = {} bohr'.format(da0,da0*self.equilibrium_volume[1],da0*self.equilibrium_volume[1] + self.equilibrium_volume[1]))
             print('dc/c at T=0 = {}, dc = {} bohr, c0 = {} bohr'.format(dc0,dc0*self.equilibrium_volume[3],dc0*self.equilibrium_volume[3]+ self.equilibrium_volume[3]))
 
@@ -2894,6 +2419,178 @@ class Gruneisen(FreeEnergy):
 
             return acell
 
+    def get_acell_from_dynmat(self, nqpt, nmode):
+
+        # Evaluate acell(T) from Gruneisen parameters, using the dynamical matrix variation
+        if self.symmetry == 'cubic':
+            
+            # First, get alpha(T)
+
+            # Get Bose-Einstein factor and specific heat Cv
+            self.bose = np.zeros((nqpt,nmode, self.ntemp))
+            cv = np.zeros((nqpt,nmode,self.ntemp))
+
+            for i,n in itt.product(range(nqpt),range(nmode)):
+                self.bose[i,n,:] = self.get_bose(self.omega[1,i,n],self.temperature)
+                cv[i,n,:] = self.get_specific_heat(self.omega[1,i,n],self.temperature)
+
+            hwt = np.einsum('qv,qvt->qvt',self.omega[1,:,:],self.bose)
+            # fix this properly later!!! 
+            #cv[0,:3,:] = 0
+
+            alpha = np.einsum('q,qvt,qv->t',self.wtq,cv,self.gruneisen_from_dynmat[0, :, :])/(9*self.equilibrium_volume[0]*self.bulk_modulus)
+
+
+            # Then, get a(T)
+            integral = 1./(9*self.bulk_modulus*self.equilibrium_volume[0])*np.einsum('q,qvt,qv->t',self.wtq,hwt,self.gruneisen_from_dynmat[0, :, :])
+            a = self.equilibrium_volume[1]*(integral+1)
+
+            # Renormalize the a(T=0) with the zero-point energy contribution
+            new_acell0 = self.equilibrium_volume[1]*(1+1./(9*self.bulk_modulus*self.equilibrium_volume[0])*np.einsum('q,qv,qv->',self.wtq,self.omega[1,:,:],self.gruneisen_from_dynmat[0, :, :])*0.5)
+            print('################ static_acell0 : {:>7.4f} bohr, new_acell0: {:>7.4f} (bohr)'.format(self.equilibrium_volume[1].round(4), new_acell0.round(4)))
+            print('delta = {:>7.4f} bohr, delta a/a0 stat = {:>6.4f}%'.format(new_acell0-self.equilibrium_volume[1], (new_acell0-self.equilibrium_volume[1]).round(4)/self.equilibrium_volume[1].round(4)*100))
+            new_V0 = new_acell0**3/4.
+            print('stat V0: {}, newV0: {}'.format(self.equilibrium_volume[0], new_V0))
+            integral_newacell0 = 1./(9*self.bulk_modulus*new_V0)*np.einsum('q,qvt,qv->t',self.wtq,hwt,self.gruneisen_from_dynmat[0, :, :])
+
+            a_plushalf = new_acell0*(integral+1)
+            
+            #test_acell = self.equilibrium_volume[1]*(integral_plushalf + 1)
+            #print('testacell={} bohr'.format(test_acell[0]))
+
+
+            #integralvol = 1./(self.bulk_modulus*self.volume[1,0])*np.einsum('q,qvt,qv->t',self.wtq,hwt,self.gruvol)
+            #vol = self.equilibrium_volume[0]*(integralvol+1)
+            #avol = (vol*4)**(1./3)
+
+            for t,T in enumerate(self.temperature):
+                print('T={}K, a={} bohr, delta a = {} bohr'.format(T,a[t],a[t]-a[0]))
+
+            a = np.expand_dims(a,axis=0)
+            self.alpha_from_dynmat = np.expand_dims(alpha, axis=0)
+            self.acell_plushalf_from_dynmat = np.expand_dims(a_plushalf,axis=0)
+            #self.cv = np.einsum('q,qvt->t',self.wtq,cv)
+            return a
+
+        if self.symmetry == 'hexagonal':
+            
+            
+
+            if self.verbose:
+                ggg = open('{}_integrals.dat'.format(self.rootname),'w')   
+
+            # First, get alpha(T)
+
+            # Get Bose-Einstein factor and specific heat Cv
+            self.bose = np.zeros((nqpt,nmode, self.ntemp))
+            cv = np.zeros((nqpt,nmode,self.ntemp))
+
+            for i,n in itt.product(range(nqpt),range(nmode)):
+                self.bose[i,n,:] = self.get_bose(self.omega[1,i,n],self.temperature)
+                cv[i,n,:] = self.get_specific_heat(self.omega[1,i,n],self.temperature)
+
+            hwt = np.einsum('qv,qvt->qvt',self.omega[1,:,:],self.bose)
+            # fix this properly later!!! 
+            #cv[0,:3,:] = 0
+
+            # Get alpha_a,c with compliance 
+            alpha_a = ( (self.compliance[0,0]+self.compliance[0,1])*np.einsum('q,qvt,qv->t',self.wtq,cv,self.gruneisen_from_dynmat[0,:,:]) +
+                self.compliance[0,2]*np.einsum('q,qvt,qv->t',self.wtq,cv,self.gruneisen_from_dynmat[1,:,:]))/self.equilibrium_volume[0]
+            alpha_c = ( 2*self.compliance[0,2]*np.einsum('q,qvt,qv->t',self.wtq,cv,self.gruneisen_from_dynmat[0,:,:]) +
+                self.compliance[2,2]*np.einsum('q,qvt,qv->t',self.wtq,cv,self.gruneisen_from_dynmat[1,:,:]))/self.equilibrium_volume[0]
+
+            self.alpha_a_from_dynmat = alpha_a
+            self.alpha_c_from_dynmat = alpha_c
+            alpha_a2 = ( (self.compliance_rigid[0,0]+self.compliance_rigid[0,1])*np.einsum('q,qvt,qv->t',self.wtq,cv,self.gruneisen_from_dynmat[0,:,:]) +
+                self.compliance_rigid[0,2]*np.einsum('q,qvt,qv->t',self.wtq,cv,self.gruneisen_from_dynmat[1,:,:]))/self.equilibrium_volume[0]
+            alpha_c2 = ( 2*self.compliance_rigid[0,2]*np.einsum('q,qvt,qv->t',self.wtq,cv,self.gruneisen_from_dynmat[0,:,:]) +
+                self.compliance_rigid[2,2]*np.einsum('q,qvt,qv->t',self.wtq,cv,self.gruneisen_from_dynmat[1,:,:]))/self.equilibrium_volume[0]
+
+            #alpha_af = ( (self.compliance[0,0]+self.compliance[0,1])*np.einsum('q,qvt,qv->t',self.wtq,cv,self.gru2[0,:,:]) +
+            #    self.compliance[0,2]*np.einsum('q,qvt,qv->t',self.wtq,cv,self.gru2[1,:,:]))/self.equilibrium_volume[0]
+            #alpha_cf = ( 2*self.compliance[0,2]*np.einsum('q,qvt,qv->t',self.wtq,cv,self.gru2[0,:,:]) +
+            #    self.compliance[2,2]*np.einsum('q,qvt,qv->t',self.wtq,cv,self.gru2[1,:,:]))/self.equilibrium_volume[0]
+
+
+            #self.cv = np.einsum('q,qvt->t',self.wtq,cv)
+
+            # Then, get a(T) and c(T)
+            integral_a = np.einsum('q,qvt,qv->t',self.wtq,hwt,self.gruneisen_from_dynmat[0,:,:])
+            integral_c = np.einsum('q,qvt,qv->t',self.wtq,hwt,self.gruneisen_from_dynmat[1,:,:])
+            integral_a0 = 0.5*np.einsum('q,qv,qv',self.wtq,self.omega[1,:,:],self.gruneisen_from_dynmat[0,:,:])
+            integral_c0 = 0.5*np.einsum('q,qv,qv',self.wtq,self.omega[1,:,:],self.gruneisen_from_dynmat[1,:,:])
+
+
+            aterm = (self.compliance[0,0]+self.compliance[0,1])*integral_a + self.compliance[0,2]*integral_c
+            a = self.equilibrium_volume[1]*(aterm/self.equilibrium_volume[0] + 1)
+            daa = aterm/self.equilibrium_volume[0]
+
+            cterm = 2*self.compliance[0,2]*integral_a + self.compliance[2,2]*integral_c
+            c = self.equilibrium_volume[3]*(cterm/self.equilibrium_volume[0] + 1)
+            dcc = cterm/self.equilibrium_volume[0]
+
+            #daa_slope = np.polyfit(self.temperature[16:],daa[16:],1)
+            #print('Delta a/a intersect: {:>8.5e}, new a0 = {} bohr'.format(daa_slope[1],-daa_slope[1]*self.equilibrium_volume[1]+self.equilibrium_volume[1]))
+            #dcc_slope = np.polyfit(self.temperature[16:],dcc[16:],1)
+            #print('Delta c/c intersect: {:>8.5e}, new c0 = {} bohr'.format(dcc_slope[1],-dcc_slope[1]*self.equilibrium_volume[3]+self.equilibrium_volume[3]))
+
+            a2 = (self.compliance_rigid[0,0]+self.compliance[0,1])*integral_a + self.compliance[0,2]*integral_c
+            a2 = self.equilibrium_volume[1]*(a2/self.equilibrium_volume[0] + 1)
+
+            c2 = 2*self.compliance_rigid[0,2]*integral_a + self.compliance[2,2]*integral_c
+            c2 = self.equilibrium_volume[3]*(c2/self.equilibrium_volume[0] + 1)
+
+            # Test the da/a at T=0, using the 1/2 factor
+            da0 = ((self.compliance[0,0]+self.compliance[0,1])*integral_a0 + self.compliance[0,2]*integral_c0)/self.equilibrium_volume[0]
+            dc0 = (2*self.compliance[0,2]*integral_a0 + self.compliance[2,2]*integral_c0)/self.equilibrium_volume[0]
+
+
+            new_a0 = self.equilibrium_volume[1]*(1 + da0)
+            new_c0 = self.equilibrium_volume[3]*(1 + dc0)
+            aplushalf = new_a0*(aterm/self.equilibrium_volume[0] + 1)
+            cplushalf = new_c0*(cterm/self.equilibrium_volume[0] + 1)
+
+
+            acell = np.array([a,c])
+            self.acell_plushalf_from_dynmat = np.array([aplushalf,cplushalf])
+
+
+            print('############### T=0')
+            #new_acell0 = self.equilibrium_volume[1]*(1+1./(9*self.bulk_modulus*self.equilibrium_volume[0])*np.einsum('q,qv,qv->',self.wtq,self.omega[1,:,:],self.gruneisen)*0.5)
+            print('################ static_acell :a0 = {:>7.4f} bohr, new_a0: {:>7.4f} (bohr)'.format(self.equilibrium_volume[1].round(4), new_a0.round(4)))
+            print('delta a = {:>7.4f} bohr, delta a/a0 stat = {:>6.4f}%'.format(new_a0-self.equilibrium_volume[1], (new_a0-self.equilibrium_volume[1]).round(4)/self.equilibrium_volume[1].round(4)*100))
+
+            print('################ static_acell :c0 = {:>7.4f} bohr, new_c0: {:>7.4f} (bohr)'.format(self.equilibrium_volume[3].round(4), new_c0.round(4)))
+            print('delta c = {:>7.4f} bohr, delta c/c0 stat = {:>6.4f}%'.format(new_c0-self.equilibrium_volume[3], (new_c0-self.equilibrium_volume[3]).round(4)/self.equilibrium_volume[3].round(4)*100))
+
+#            self.acell2 = np.array([a2,c2])
+            if self.verbose:
+                'write details of compliance vs intergrals in <rootname>_integrals.dat file'''
+                ggg.write('Terms entering the thermal expansion of a\n\n')
+                ggg.write('{:15}  {:18}  {:18}  {:18}  {:18}\n'.format('Temperature (K)','compliance_a','integral_a','compliance_c','integral_c'))
+                for t, T in enumerate(self.temperature):
+                    ggg.write('{:>15.0f}  {:>.12e}  {:>.12e}  {:>.12e}  {:>.12e}\n'.format(T,self.compliance[0,0]+self.compliance[0,1],integral_a[t],self.compliance[0,2],integral_c[t]))
+                ggg.write('\n\nTerms entering the thermal expansion of c\n\n')
+                ggg.write('{:15}  {:18}  {:18}  {:18}  {:18}\n'.format('Temperature (K)','compliance_a','integral_a','compliance_c','integral_c'))
+                for t, T in enumerate(self.temperature):
+                    ggg.write('{:>15.0f}  {:>.12e}  {:>.12e}  {:>.12e}  {:>.12e}\n'.format(T,2*self.compliance[0,2],integral_a[t],self.compliance[2,2],integral_c[t]))
+
+                ggg.close()
+
+            print('From Gruneisen parameters, using dynamical matrix')
+            print('da/a at T=0 = {}, da = {} bohr, a0 = {} bohr'.format(da0,da0*self.equilibrium_volume[1],da0*self.equilibrium_volume[1] + self.equilibrium_volume[1]))
+            print('dc/c at T=0 = {}, dc = {} bohr, c0 = {} bohr'.format(dc0,dc0*self.equilibrium_volume[3],dc0*self.equilibrium_volume[3]+ self.equilibrium_volume[3]))
+
+            for t,T in enumerate(self.temperature):
+                print('T={}K, a={}, c={}'.format(T,a[t],c[t]))
+                print('plushalf, a={}, c={}'.format(aplushalf[t],cplushalf[t]))
+
+
+
+            self.alpha_from_dynmat = np.array([alpha_a, alpha_c])
+
+            return acell
+
 
     def discrete_alpha_vs_reftemp(self,acell,ref_temp):
 
@@ -3042,121 +2739,136 @@ class Gruneisen(FreeEnergy):
             return np.array([pph_a,pph_c])
 
 
-    def gruneisen_from_dynmat(self,nqpt,nmode,nvol):
+    def get_gruneisen_from_dynmat(self,nqpt,nmode,nvol):
 
         # This computes the gruneisen parameters from the change in the dynamical matrix
-        # like phonopy and anaddb
+        # like phonopy (and anaddb?)
             
         # for now, I reopen all files, but later on change the loop ordering (anyway, it should not do everything linearly, but rather use functions depending of input parameters
 
-        gru = np.zeros((nqpt,nmode))
-        dplus =  2
-        d0 = 1
-        dminus = 0 # put this in a function
-        dV = self.volume[dplus,0] - self.volume[dminus,0]
-        V0 = self.volume[d0,0]
+        if self.symmetry == 'cubic':
 
+            gru = np.zeros((nqpt,nmode))
+            dplus =  2
+            d0 = 1
+            dminus = 0 # put this in a function
+            # Get the linear cell dimension change, not volumic
+            # gamma^a = gamma^V/3
+            dV = self.volume[dplus,1] - self.volume[dminus,1]
+            V0 = self.volume[d0,1]
 
-#        fg = open('gruneisen_dynmat.dat','w')
-        fg = open('dotproduct_dynmat.dat','w')
-        for i in range(nqpt):
-            dD = np.zeros((nmode,nmode),dtype=complex)
-            for v in range(nvol):
+            for i in range(nqpt):
+                dD = np.zeros((nmode,nmode),dtype=complex)
+                for vol in range(nvol):
 
-                # open the ddb file
-                ddb = DdbFile(self.ddb_flists[v][i])
+                    # open the ddb file
+                    ddb = DdbFile(self.ddb_flists[vol][i])
 
-                # Check if qpt is Gamma
-                is_gamma = ddb.is_gamma
+                    # Check if qpt is Gamma
+                    is_gamma = ddb.is_gamma
 
-                # this is taken from Gabriel's code, directly. for testing purposes.
-                amu = np.zeros(ddb.natom)
-                for ii in np.arange(ddb.natom):
-    
-                    jj = ddb.typat[ii]
-                    amu[ii] = ddb.amu[jj-1]
+                    dynmat = ddb.get_mass_scaled_dynmat_cart()
 
-                dynmat = ddb.get_mass_scaled_dynmat_cart()
+                    if vol==dplus:
+                        dD = dD + dynmat
+                    if vol==dminus:
+                        dD = dD - dynmat
+                    if vol==d0:
+                        eigval, eigvect = np.linalg.eigh(dynmat)
+                        omega = np.sqrt(np.abs(eigval)) * np.sign(eigval)
 
-                if v==dplus:
-                    dD += dynmat
-                if v==dminus:
-                    dD -= dynmat
-                if v==d0:
-                    #eigval is omega^2
-                    eigval, eigvect = np.linalg.eigh(dynmat)
+                        if is_gamma:
+                            eigval[0] = 0.0
+                            eigval[1] = 0.0
+                            eigval[2] = 0.0
 
-                    omega = np.sqrt(np.abs(eigval)) * np.sign(eigval)
+                        for ieig,eig in enumerate(eigval):
+                            if eig < 0.0:
+                                warnings.warn('Negative eigenvalue changed to 0')
+                                eigval[ieig] = 0.0
 
-                    for ii in np.arange(ddb.natom):
-                        for dir1 in np.arange(3):
-                            ipert = ii*3 + dir1
-#                            eigvect[ipert] = eigvect[ipert]*np.sqrt(cst.me_amu/amu[ii])
-                            eigvect[ipert] = eigvect[ipert]
-                    
-                    if is_gamma:
-                        eigval[0] = 0.0
-                        eigval[1] = 0.0
-                        eigval[2] = 0.0
+                # end loop on volumes
+           
+                dD_at_q = []
 
-                    for ieig,eig in enumerate(eigval):
-                        if eig < 0.0:
-                            warnings.warn('Negative eigenvalue changed to 0')
-                            eigval[ieig] = 0.0
+                for v in range(nmode):
 
-            # end v in range(nvol)
-       
-            dD_at_q = []
+                    vect = eigvect[:,v]
+                    dD_at_q.append(np.vdot(np.transpose(vect), np.dot(dD,vect)).real)   
 
-            for eig in eigvect:
+                dD_at_q = np.array(dD_at_q)
 
-                dD_at_q.append(np.vdot(np.transpose(eig), np.dot(dD,eig)).real)   
-#                if i==1:
-                #    print(eig)
-               #     print(np.dot(dD,eig))
-                #print(dD_at_q)
-                    
+                for v in range(nmode):
 
-            dD_at_q = np.array(dD_at_q)
+                    if eigval[v].real < tol12:
+                        gru[i,v] = 0
+                    else:
+                        gru[i,v] = -V0*dD_at_q[v]/(2*np.abs(eigval[v].real)*dV)
 
-            fg.write('\nqpt {}\n'.format(i+1))
-#            fg.write('Real part:\n')
-            for v in range(nmode):
+            gru = np.expand_dims(gru, axis=0)
 
-                fg.write('Eigenvectors\n')
-#                fg.write('{:>12.8e} {:>12.8e} {:>12.8e} {:>12.8e} {:>12.8e} {:>12.8e}\n'.format(dD[v,0].real/dV,dD[v,1].real/dV,dD[v,2].real/dV,dD[v,3].real/dV,dD[v,4].real/dV,dD[v,5].real/dV))
-                fg.write('{:>12.8e} {:>12.8e} {:>12.8e} {:>12.8e} {:>12.8e} {:>12.8e}\n'.format(eigvect[v,0].real,eigvect[v,1].real,eigvect[v,2].real,eigvect[v,3].real,eigvect[v,4].real,eigvect[v,5].real))
-                fg.write('{:>12.8e} {:>12.8e} {:>12.8e} {:>12.8e} {:>12.8e} {:>12.8e}\n'.format(eigvect[v,0].imag,eigvect[v,1].imag,eigvect[v,2].imag,eigvect[v,3].imag,eigvect[v,4].imag,eigvect[v,5].imag))
+        if self.symmetry == 'hexagonal':
 
-#                if i==0 and v<3:
-                if omega[v] < tol12:
-                    gru[i,v] = 0
-                else:
-                    gru[i,v] = -V0*dD_at_q[v]/(2*np.abs(eigval[v].real)*dV)
-#            fg.write('Imaginary part:\n')
-#            for v in range(nmode):
-#                fg.write('{:>12.8e} {:>12.8e} {:>12.8e} {:>12.8e} {:>12.8e} {:>12.8e}\n'.format(dD[v,0].imag/dV,dD[v,1].imag/dV,dD[v,2].imag/dV,dD[v,3].imag/dV,dD[v,4].imag/dV,dD[v,5].imag/dV))
-
-            fg.write('dD/dV|u>\n')
-            for v in range(nmode):
-                omat = np.dot(dD/dV,eigvect[v,:])
-                fg.write('{:>12.8e} {:>12.8e} {:>12.8e} {:>12.8e} {:>12.8e} {:>12.8e}\n'.format(omat[0].real,omat[1].real,omat[2].real,omat[3].real,omat[4].real,omat[5].real))
-                fg.write('{:>12.8e} {:>12.8e} {:>12.8e} {:>12.8e} {:>12.8e} {:>12.8e}\n'.format(omat[0].imag,omat[1].imag,omat[2].imag,omat[3].imag,omat[4].imag,omat[5].imag))
-
-                fg.write('Dot product:\n')
-                dot = np.vdot(np.transpose(eigvect[v,:]),omat)
-                fg.write('{:>12.8e}\n'.format(dot.real))     
+            gru = np.zeros((2, nqpt, nmode))
+            dplus =  [2, 5]
+            d0 = [1, 4]
+            dminus = [0, 3] # put this in a function...
         
+            dV = [self.volume[dplus[0],1] - self.volume[dminus[0],1], self.volume[dplus[1],3] - self.volume[dminus[1],3]]
+            V0 = [self.volume[d0[0], 1], self.volume[d0[1], 3]]
 
-#            if i==1:
-#
-#                print('Dynamical matrix')
-#                print('delta omega^2 {}'.format(dD_at_q))
-#                print('omega0 {}'.format(eigval[:]))
-#                print('gruneisen {}'.format(gru[i,:]))
-                
+            for a in range(2):
 
-        # end i in range(nqpt)
+                for i in range(nqpt):
+                    dD = np.zeros((nmode,nmode),dtype=complex)
+                    for vol in range(3):
+
+                        ivol = 3*a + vol
+                        # open the ddb file
+                        ddb = DdbFile(self.ddb_flists[ivol][i])
+
+                        # Check if qpt is Gamma
+                        is_gamma = ddb.is_gamma
+
+                        dynmat = ddb.get_mass_scaled_dynmat_cart()
+
+                        if ivol==dplus[a]:
+                            dD = dD + dynmat
+                        if ivol==dminus[a]:
+                            dD = dD - dynmat
+                        if ivol==d0[a]:
+                            eigval, eigvect = np.linalg.eigh(dynmat)
+                            omega = np.sqrt(np.abs(eigval)) * np.sign(eigval)
+
+                            if is_gamma:
+                                eigval[0] = 0.0
+                                eigval[1] = 0.0
+                                eigval[2] = 0.0
+
+                            for ieig,eig in enumerate(eigval):
+                                if eig < 0.0:
+                                    warnings.warn('Negative eigenvalue changed to 0')
+                                    eigval[ieig] = 0.0
+
+                    # end loop on volumes
+                    dD_at_q = []
+
+                    for v in range(nmode):
+
+                        vect = eigvect[:,v]
+                        dD_at_q.append(np.vdot(np.transpose(vect), np.dot(dD,vect)).real)   
+
+                    dD_at_q = np.array(dD_at_q)
+
+                    for v in range(nmode):
+
+                        if eigval[v].real < tol12:
+                            gru[a,i,v] = 0
+                        else:
+                            if a == 0:
+                                gru[a,i,v] = -V0[a]*dD_at_q[v]/(4*np.abs(eigval[v].real)*dV[a])
+                            elif a == 1:
+                                gru[a,i,v] = -V0[a]*dD_at_q[v]/(2*np.abs(eigval[v].real)*dV[a])
 
         return gru
 
@@ -3226,11 +2938,6 @@ class Gruneisen(FreeEnergy):
             data[:,:] = self.room_temp_alpha[:,:]
             data.units = 'K^-1'
 
-
-#            data = dts.createVariable('alpha_c','d', ('number_of_temperatures'))
-#            data[:] = self.alpha_c[:]
-#            data.units = 'K^-1'
-
             data = dts.createVariable('bulk_modulus_habo3','d',('one'))
             data[:] = self.bulkmodulus_from_elastic*cst.gpa_to_habo3
 
@@ -3246,6 +2953,14 @@ class Gruneisen(FreeEnergy):
 
             data = dts.createVariable('gruneisen_parameters', 'd', ('number_of_lattice_parameters', 'number_of_qpoints', 'number_of_modes'))
             data[:, :, :] = self.gruneisen[:, :, :]
+
+            data = dts.createVariable('gruneisen_parameters_from_dynmat', 'd', ('number_of_lattice_parameters', 'number_of_qpoints', 'number_of_modes'))
+            data[:, :, :] = self.gruneisen_from_dynmat[:, :, :]
+
+
+            data = dts.createVariable('omega_equilibrium', 'd', ('number_of_qpoints', 'number_of_modes'))
+            data[:, :] = self.omega[1, :, :]
+            data.units = 'Hartree'
 
 
 
