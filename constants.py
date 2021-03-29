@@ -17,6 +17,7 @@ ang_to_bohr = 1./bohr_to_ang
 habohr_to_evang = ha_to_ev/bohr_to_ang
 
 ev_to_j = 1.60217657E-19
+j_to_ev = 1./ev_to_j
 
 # Boltzmann constant
 kb_haK = 3.1668154267112283e-06
