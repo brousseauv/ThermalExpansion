@@ -829,6 +829,7 @@ class GibbsFreeEnergy(FreeEnergy):
 
         wtq = [1.0],
         temperature = np.arange(0,300,50),
+        tmin_slope = 500,
 
         check_anaddb = False,
 
@@ -877,6 +878,7 @@ class GibbsFreeEnergy(FreeEnergy):
 
         self.temperature = temperature
         self.ntemp = len(self.temperature) 
+        self.tmin_slope = tmin_slope
 
         if not bulk_modulus:
             raise Exception('Must provide an estimate of the bulk modulus and specify its units, in GPa or Ha/bohr^3')
@@ -911,6 +913,8 @@ class GibbsFreeEnergy(FreeEnergy):
         # set parameter space dimensions
         nvol, nqpt = np.shape(self.ddb_flists)
         self.free_energy = np.zeros((nvol,self.ntemp))
+        self.static_energy = np.zeros_like(self.free_energy)
+        self.phonon_free_energy = np.zeros_like(self.free_energy)
 
         #Store reduced coordinates of qpoints
         self.qred = np.zeros((nqpt,3))
@@ -986,6 +990,8 @@ class GibbsFreeEnergy(FreeEnergy):
                 
             # Sum free energy = E + F_0 + F_T + PV
             self.free_energy[v,:] = (E+F_0)*np.ones((self.ntemp)) + F_T + self.pressure*self.volume[v,0]*np.ones((self.ntemp))
+            self.static_energy[v,:] = E*np.ones((self.ntemp)) + self.pressure*self.volume[v,0]*np.ones((self.ntemp))
+            self.phonon_free_energy[v,:] = F_0*np.ones((self.ntemp)) + F_T
 
         if self.check_anaddb:
             # Convert results in J/mol-cell, to compare with anaddb output
@@ -1053,7 +1059,8 @@ class GibbsFreeEnergy(FreeEnergy):
 
             fit = np.zeros((2,self.ntemp))
             self.volumic_fit_params = np.zeros((4,self.ntemp)) # [ [V0,E0,B0, B0'],T]
-            self.fit_params = np.zeros((5,self.ntemp)) # defined in self.fit_params_list
+            self.c_over_a = np.zeros((self.ntemp))
+#            self.fit_params = np.zeros((5,self.ntemp)) # defined in self.fit_params_list
 
             # Define EOS type, for volumic fit
             if self.eos_type == 'Murnaghan':
@@ -1083,12 +1090,17 @@ class GibbsFreeEnergy(FreeEnergy):
                     print('From volumic EOS fit:')
                     print("  K0={} GPa,K0'={}".format(popt[2]/cst.gpa_to_habo3,popt[3]))
 
+                if t == 0:
+                    print('Zero-point volume change: {:>8.4f} Bohr^3'.format(popt[0]-self.equilibrium_volume[0]))
+
 
                 #Free energy surface 2D fit
                 if self.use_axial_eos:
 
                     print('   Using {} axial EOS'.format(self.eos_type))
                     self.fit_params_list = "a0, c0, E0, B0, B0p"
+                    self.fit_params = np.zeros((5,self.ntemp))
+
                     # 2D fit with lmfit, 2D EOS
                     # First, create 2D mesh:
                     ac_mesh = np.meshgrid(self.volume[:,1],self.volume[:,3])
@@ -1123,43 +1135,109 @@ class GibbsFreeEnergy(FreeEnergy):
                 ####################################
                 else:
 
-                    print('   Using Paraboloid2D')
+#                    print('   Using Paraboloid2D')
+#
+#                    self.fit_params_list = 'a0, A, c0, C, B=E0'
+#                    # 2D fit with lmfit, Paraboloid function
+#                    # First, create 2D mesh:
+#                    ac_mesh = np.meshgrid(self.volume[:,1],self.volume[:,3])
+#                    free_energy2D = self.free_energy[:,t]
+#
+#                    #Create the model and initialize the parameters
+#                    lmfit_model_para = lmfit.Model(eos.paraboloid_2D)
+#
+#                    params_para = lmfit_model_para.make_params()
+#                    params_para['a0'].set(value=self.equilibrium_volume[1], vary=True,min=0.95*self.equilibrium_volume[1],max=1.08*self.equilibrium_volume[1])
+#                    params_para['c0'].set(value=self.equilibrium_volume[3], vary=True,min=0.95*self.equilibrium_volume[3],max=1.08*self.equilibrium_volume[3])
+#                    params_para['A'].set(value=1.,vary=True,min=0.)
+#                    params_para['C'].set(value=1.,vary=True,min=0.)
+#                    params_para['B'].set(value=free_energy2D[self.equilibrium_index],vary=True,min=1.10*free_energy2D[self.equilibrium_index],max=0.95*free_energy2D[self.equilibrium_index])
+#
+#                    lmfit_result_para=lmfit_model_para.fit(free_energy2D,mesh=[self.volume[:,1],self.volume[:,3]],a0=params_para['a0'],A=params_para['A'],c0=params_para['c0'],C=params_para['C'],B=params_para['B'])
+#                    print(lmfit_result_para.params.pretty_print())
+#
+#                    if self.verbose:
+#                        print(lmfit_result_para.fit_report())
+#
+#                    fit[0,t] = lmfit_result_para.params['a0'].value
+#                    fit[1,t] = lmfit_result_para.params['c0'].value
+#
+#                    self.fit_params[0,t] = lmfit_result_para.params['a0'].value
+#                    self.fit_params[1,t] = lmfit_result_para.params['A'].value
+#                    self.fit_params[2,t] = lmfit_result_para.params['c0'].value
+#                    self.fit_params[3,t] = lmfit_result_para.params['C'].value
+#                    self.fit_params[4,t] = lmfit_result_para.params['B'].value
+#
+                    ## Test using a more general quadratic surface (i.e. rotated paraboloid)
+                    print('   Using Ellipsoid2D')
 
-                    self.fit_params_list = 'a0, A, c0, C, B=E0'
+                    self.fit_params_list = 'A, B, C, D, E, F'
+                    self.fit_params = np.zeros((6,self.ntemp))
+
                     # 2D fit with lmfit, Paraboloid function
                     # First, create 2D mesh:
                     ac_mesh = np.meshgrid(self.volume[:,1],self.volume[:,3])
                     free_energy2D = self.free_energy[:,t]
 
                     #Create the model and initialize the parameters
-                    lmfit_model_para = lmfit.Model(eos.paraboloid_2D)
+                    lmfit_model_ell = lmfit.Model(eos.ellipsoid_2D)
 
-                    params_para = lmfit_model_para.make_params()
-                    params_para['a0'].set(value=self.equilibrium_volume[1], vary=True,min=0.95*self.equilibrium_volume[1],max=1.08*self.equilibrium_volume[1])
-                    params_para['c0'].set(value=self.equilibrium_volume[3], vary=True,min=0.95*self.equilibrium_volume[3],max=1.08*self.equilibrium_volume[3])
-                    params_para['A'].set(value=1.,vary=True,min=0.)
-                    params_para['C'].set(value=1.,vary=True,min=0.)
-                    params_para['B'].set(value=free_energy2D[self.equilibrium_index],vary=True,min=1.10*free_energy2D[self.equilibrium_index],max=0.95*free_energy2D[self.equilibrium_index])
+                    params_ell = lmfit_model_ell.make_params()
+#                    params_ell['a0'].set(value=self.equilibrium_volume[1], vary=True,min=0.95*self.equilibrium_volume[1],max=1.08*self.equilibrium_volume[1])
+#                    params_ell['c0'].set(value=self.equilibrium_volume[3], vary=True,min=0.95*self.equilibrium_volume[3],max=1.08*self.equilibrium_volume[3])
+                    params_ell['A'].set(value=1.,vary=True)
+                    params_ell['B'].set(value=1.,vary=True)
+                    params_ell['C'].set(value=1.,vary=True)
+                    params_ell['D'].set(value=1.,vary=True)
+                    params_ell['E'].set(value=1.,vary=True)
+                    params_ell['F'].set(value=free_energy2D[self.equilibrium_index],vary=True)
 
-                    lmfit_result_para=lmfit_model_para.fit(free_energy2D,mesh=[self.volume[:,1],self.volume[:,3]],a0=params_para['a0'],A=params_para['A'],c0=params_para['c0'],C=params_para['C'],B=params_para['B'])
-                    print(lmfit_result_para.params.pretty_print())
+#                    params_ell['F'].set(value=free_energy2D[self.equilibrium_index],vary=True,min=1.20*free_energy2D[self.equilibrium_index],max=0.80*free_energy2D[self.equilibrium_index])
+
+                    lmfit_result_ell=lmfit_model_ell.fit(free_energy2D,mesh=[self.volume[:,1],self.volume[:,3]],A=params_ell['A'],B=params_ell['B'],C=params_ell['C'],D=params_ell['D'],E=params_ell['E'],
+                            F=params_ell['F'])
+                    print(lmfit_result_ell.params.pretty_print())
 
                     if self.verbose:
-                        print(lmfit_result_para.fit_report())
+                        print(lmfit_result_ell.fit_report())
 
-                    fit[0,t] = lmfit_result_para.params['a0'].value
-                    fit[1,t] = lmfit_result_para.params['c0'].value
+                    if t==0:
+                        print('From ellipsoid')
+                        A = lmfit_result_ell.params['A'].value
+                        B = lmfit_result_ell.params['B'].value
+                        C = lmfit_result_ell.params['C'].value
+                        D = lmfit_result_ell.params['D'].value
+                        E = lmfit_result_ell.params['E'].value
 
-                    self.fit_params[0,t] = lmfit_result_para.params['a0'].value
-                    self.fit_params[1,t] = lmfit_result_para.params['A'].value
-                    self.fit_params[2,t] = lmfit_result_para.params['c0'].value
-                    self.fit_params[3,t] = lmfit_result_para.params['C'].value
-                    self.fit_params[4,t] = lmfit_result_para.params['B'].value
+
+                        a0 = (B*E-2*C*D)/(4*A*C-B**2)
+                        c0 = -1./B*(2*A*a0+D)
+                        print('a0={:>7.4f}, delta a = {:>7.4f}'.format(a0, (a0-self.equilibrium_volume[1]).round(4)))
+                        print('c0={:>7.4f}, delta c = {:>7.4f}'.format(c0, (c0-self.equilibrium_volume[3]).round(4)))
+                        vol0 = np.sqrt(3)/2*a0**2*c0
+                        print('Volume change = {} Bohr^3'.format(vol0 - self.equilibrium_volume[0]))
+
+
+                    fit[0,t] = a0
+                    fit[1,t] = c0
+
+                    self.fit_params[0,t] = lmfit_result_ell.params['A'].value
+                    self.fit_params[1,t] = lmfit_result_ell.params['B'].value
+                    self.fit_params[2,t] = lmfit_result_ell.params['C'].value
+                    self.fit_params[3,t] = lmfit_result_ell.params['D'].value
+                    self.fit_params[4,t] = lmfit_result_ell.params['E'].value
+                    self.fit_params[5,t] = lmfit_result_ell.params['F'].value
+
                 
             print('########### T=0 K')
             print('delta a = {:>7.4f} bohr, delta a/a0 stat = {:>6.4f}%'.format((fit[0,0]-self.equilibrium_volume[1]).round(4), (fit[0,0]-self.equilibrium_volume[1]).round(4)/self.equilibrium_volume[1].round(4)*100))
             print('delta c = {:>7.4f} bohr, delta c/c0 stat = {:>6.4f}%'.format((fit[1,0]-self.equilibrium_volume[3]).round(4), (fit[1,0]-self.equilibrium_volume[3]).round(4)/self.equilibrium_volume[3].round(4)*100))
 
+            self.c_over_a = fit[1,:]/fit[0,:]
+            c_over_a_stat = self.equilibrium_volume[3]/self.equilibrium_volume[1]
+            print('delta(c/a) = {:>7.5f}, {:>7.5f}% vs static'.format(self.c_over_a[0]-c_over_a_stat, (self.c_over_a[0]-c_over_a_stat)/(c_over_a_stat)*100))
+            print('stat: c={}, a={}, c/a={}'.format(self.equilibrium_volume[3], self.equilibrium_volume[1], self.equilibrium_volume[3]/self.equilibrium_volume[1]))
+            print('ZPAE: c={}, a={}, c/a={}'.format(fit[1,0], fit[0,0], fit[1,0]/fit[0,0]))
             return fit
 
 #    def residuals(self,params,x,y,z):
@@ -1263,8 +1341,8 @@ class GibbsFreeEnergy(FreeEnergy):
 
         dt = self.temperature[temp_index+1] - self.temperature[temp_index] 
         ref_acell = acell[:,temp_index] + (acell[:,temp_index+1]-acell[:,temp_index])/dt*(ref_temp - self.temperature[temp_index])
-        print(acell[:,0],ref_acell)
-        print(acell)
+        #print(acell[:,0],ref_acell)
+        #print(acell)
 
         for t in range(self.ntemp):
 
@@ -1311,8 +1389,21 @@ class GibbsFreeEnergy(FreeEnergy):
             data[:,:] = self.temperature_dependent_acell[:,:]
             data.units = 'Bohr radius'
 
+            data = dts.createVariable('c_over_a', 'd', ('number_of_temperatures'))
+            if self.symmetry == 'hexagonal':
+                data[:] = self.c_over_a[:]
+            data.units = 'Unitless'
+
             data = dts.createVariable('free_energy', 'd', ('number_of_volumes', 'number_of_temperatures'))
             data[:,:] = self.free_energy[:,:]
+            data.units = 'hartree'
+
+            data = dts.createVariable('static_energy', 'd', ('number_of_volumes', 'number_of_temperatures'))
+            data[:,:] = self.static_energy[:,:]
+            data.units = 'hartree'
+
+            data = dts.createVariable('phonon_free_energy', 'd', ('number_of_volumes', 'number_of_temperatures'))
+            data[:,:] = self.phonon_free_energy[:,:]
             data.units = 'hartree'
 
             data = dts.createVariable('volume','d', ('number_of_volumes','four'))
@@ -1330,7 +1421,7 @@ class GibbsFreeEnergy(FreeEnergy):
                 if self.use_axial_eos:
                     data.description = self.eos_type
                 else:
-                    data.description = 'Paraboloid2D'
+                    data.description = 'Ellipsoid2D'
             elif self.symmetry == 'cubic':
                 data.description = self.eos_type
 
@@ -1503,7 +1594,7 @@ class Gruneisen(FreeEnergy):
                 self.bulk_modulus = bulk_modulus
             else:
                 raise Exception('Bulk modulus units must be GPa or Ha/bohr^3')
-
+################# This could be in a function??
         #Define EOS type
         self.eos_type = eos_type
         if self.eos_type not in self.eos_list:
@@ -1638,21 +1729,23 @@ class Gruneisen(FreeEnergy):
                 if self.bulk_modulus is None:
                     print('Using bulk modulus from elastic constants.')
                     self.bulk_modulus = self.bulkmodulus_from_elastic*cst.gpa_to_habo3
+                    self.bulk_modulus_rigid = bmod2*cst.gpa_to_habo3
                 else:
                     print('Using bulk modulus from input file.')
 
-            print('Bulk modulus from elastic constants = {:>7.3f} GPa'.format(bmod))
-            print('Bulk modulus from elastic constants (clamped) = {:>7.3f} GPa'.format(bmod2))
+            if self.verbose:
+                print('Bulk modulus from elastic constants = {:>7.3f} GPa'.format(bmod))
+                print('Bulk modulus from elastic constants (clamped) = {:>7.3f} GPa'.format(bmod2))
 
-            print('Elastic constants:')
-            print('c11 = {}, c33 = {}, c12 = {}, c13 = {} GPa'.format(elastic.stiffness_relaxed[0,0],elastic.stiffness_relaxed[2,2],elastic.stiffness_relaxed[0,1],elastic.stiffness_relaxed[0,2]))
-            print('Clamped:')
-            print('c11 = {}, c33 = {}, c12 = {}, c13 = {} GPa'.format(elastic.stiffness_clamped[0,0],elastic.stiffness_clamped[2,2],elastic.stiffness_clamped[0,1],elastic.stiffness_clamped[0,2]))
+                print('Elastic constants:')
+                print('c11 = {}, c33 = {}, c12 = {}, c13 = {} GPa'.format(elastic.stiffness_relaxed[0,0],elastic.stiffness_relaxed[2,2],elastic.stiffness_relaxed[0,1],elastic.stiffness_relaxed[0,2]))
+                print('Clamped:')
+                print('c11 = {}, c33 = {}, c12 = {}, c13 = {} GPa'.format(elastic.stiffness_clamped[0,0],elastic.stiffness_clamped[2,2],elastic.stiffness_clamped[0,1],elastic.stiffness_clamped[0,2]))
 
-            print('Compliance constants:')
-            print('s11 = {}, s33 = {}, s12 = {}, s13 = {} GPa^-1'.format(elastic.compliance_relaxed[0,0],elastic.compliance_relaxed[2,2],elastic.compliance_relaxed[0,1],elastic.compliance_relaxed[0,2]))
-            print('Clamped:')
-            print('s11 = {}, s33 = {}, s12 = {}, s13 = {} GPa^-1'.format(elastic.compliance_clamped[0,0],elastic.compliance_clamped[2,2],elastic.compliance_clamped[0,1],elastic.compliance_clamped[0,2]))
+                print('Compliance constants:')
+                print('s11 = {}, s33 = {}, s12 = {}, s13 = {} GPa^-1'.format(elastic.compliance_relaxed[0,0],elastic.compliance_relaxed[2,2],elastic.compliance_relaxed[0,1],elastic.compliance_relaxed[0,2]))
+                print('Clamped:')
+                print('s11 = {}, s33 = {}, s12 = {}, s13 = {} GPa^-1'.format(elastic.compliance_clamped[0,0],elastic.compliance_clamped[2,2],elastic.compliance_clamped[0,1],elastic.compliance_clamped[0,2]))
 
 
 
@@ -2101,7 +2194,7 @@ class Gruneisen(FreeEnergy):
             
             
             plot = False
-
+            self.c_over_a = np.zeros((self.ntemp))
             if self.verbose:
                 ggg = open('{}_integrals.dat'.format(self.rootname),'w')   
 
@@ -2197,6 +2290,7 @@ class Gruneisen(FreeEnergy):
 
             acell = np.array([a,c])
             self.acell_plushalf = np.array([aplushalf,cplushalf])
+            self.c_over_a = cplushalf/aplushalf
 
 
             print('############### T=0')
@@ -2206,6 +2300,11 @@ class Gruneisen(FreeEnergy):
 
             print('################ static_acell :c0 = {:>7.4f} bohr, new_c0: {:>7.4f} (bohr)'.format(self.equilibrium_volume[3].round(4), new_c0.round(4)))
             print('delta c = {:>7.4f} bohr, delta c/c0 stat = {:>6.4f}%'.format(new_c0-self.equilibrium_volume[3], (new_c0-self.equilibrium_volume[3]).round(4)/self.equilibrium_volume[3].round(4)*100))
+
+            c_over_a_stat = self.equilibrium_volume[3]/self.equilibrium_volume[1]
+            print('delta(c/a) = {:>7.5f}, {:>7.5f}% vs static'.format(self.c_over_a[0]-c_over_a_stat, (self.c_over_a[0]-c_over_a_stat)/(c_over_a_stat)*100))
+            print('stat: c={}, a={}, c/a={}'.format(self.equilibrium_volume[3], self.equilibrium_volume[1], self.equilibrium_volume[3]/self.equilibrium_volume[1]))
+            print('ZPAE: c={}, a={}, c/a={}'.format(cplushalf[0], aplushalf[0], self.c_over_a[0]))
 
 #            self.acell2 = np.array([a2,c2])
             if self.verbose:
@@ -2455,6 +2554,12 @@ class Gruneisen(FreeEnergy):
 
             a_plushalf = new_acell0*(integral+1)
             
+            #Test with rigid compliance tensor
+            new_acell0_rigid = self.equilibrium_volume[1]*(1+1./(9*self.bulk_modulus_rigid*self.equilibrium_volume[0])*np.einsum('q,qv,qv->',self.wtq,self.omega[1,:,:],self.gruneisen_from_dynmat[0, :, :])*0.5)
+            print('################ From Rigid compliance tensor, static_acell0 : {:>7.4f} bohr, new_acell0: {:>7.4f} (bohr)'.format(self.equilibrium_volume[1].round(4),
+                new_acell0_rigid.round(4)))
+            print('delta = {:>7.4f} bohr, delta a/a0 stat = {:>6.4f}%'.format(new_acell0-self.equilibrium_volume[1], (new_acell0-self.equilibrium_volume[1]).round(4)/self.equilibrium_volume[1].round(4)*100))
+
             #test_acell = self.equilibrium_volume[1]*(integral_plushalf + 1)
             #print('testacell={} bohr'.format(test_acell[0]))
 
@@ -2543,6 +2648,8 @@ class Gruneisen(FreeEnergy):
             # Test the da/a at T=0, using the 1/2 factor
             da0 = ((self.compliance[0,0]+self.compliance[0,1])*integral_a0 + self.compliance[0,2]*integral_c0)/self.equilibrium_volume[0]
             dc0 = (2*self.compliance[0,2]*integral_a0 + self.compliance[2,2]*integral_c0)/self.equilibrium_volume[0]
+            da0_rigid = ((self.compliance_rigid[0,0]+self.compliance_rigid[0,1])*integral_a0 + self.compliance_rigid[0,2]*integral_c0)/self.equilibrium_volume[0]
+            dc0_rigid = (2*self.compliance_rigid[0,2]*integral_a0 + self.compliance_rigid[2,2]*integral_c0)/self.equilibrium_volume[0]
 
 
             new_a0 = self.equilibrium_volume[1]*(1 + da0)
@@ -2550,6 +2657,9 @@ class Gruneisen(FreeEnergy):
             aplushalf = new_a0*(aterm/self.equilibrium_volume[0] + 1)
             cplushalf = new_c0*(cterm/self.equilibrium_volume[0] + 1)
 
+
+            new_a0_rigid = self.equilibrium_volume[1]*(1 + da0_rigid)
+            new_c0_rigid = self.equilibrium_volume[3]*(1 + dc0_rigid)
 
             acell = np.array([a,c])
             self.acell_plushalf_from_dynmat = np.array([aplushalf,cplushalf])
@@ -2562,6 +2672,13 @@ class Gruneisen(FreeEnergy):
 
             print('################ static_acell :c0 = {:>7.4f} bohr, new_c0: {:>7.4f} (bohr)'.format(self.equilibrium_volume[3].round(4), new_c0.round(4)))
             print('delta c = {:>7.4f} bohr, delta c/c0 stat = {:>6.4f}%'.format(new_c0-self.equilibrium_volume[3], (new_c0-self.equilibrium_volume[3]).round(4)/self.equilibrium_volume[3].round(4)*100))
+            # From rigid compliance tensor
+            print('################ static_acell :a0 = {:>7.4f} bohr, new_a0_rigid: {:>7.4f} (bohr)'.format(self.equilibrium_volume[1].round(4), new_a0_rigid.round(4)))
+            print('delta a = {:>7.4f} bohr, delta a/a0 stat = {:>6.4f}%'.format(new_a0_rigid-self.equilibrium_volume[1], (new_a0_rigid-self.equilibrium_volume[1]).round(4)/self.equilibrium_volume[1].round(4)*100))
+
+            print('################ static_acell :c0 = {:>7.4f} bohr, new_c0_rigid: {:>7.4f} (bohr)'.format(self.equilibrium_volume[3].round(4), new_c0_rigid.round(4)))
+            print('delta c = {:>7.4f} bohr, delta c/c0 stat = {:>6.4f}%'.format(new_c0_rigid-self.equilibrium_volume[3], (new_c0_rigid-self.equilibrium_volume[3]).round(4)/self.equilibrium_volume[3].round(4)*100))
+
 
 #            self.acell2 = np.array([a2,c2])
             if self.verbose:
@@ -2749,6 +2866,7 @@ class Gruneisen(FreeEnergy):
         if self.symmetry == 'cubic':
 
             gru = np.zeros((nqpt,nmode))
+            gru_rot = np.zeros_like(gru)
             dplus =  2
             d0 = 1
             dminus = 0 # put this in a function
@@ -2798,18 +2916,25 @@ class Gruneisen(FreeEnergy):
 
                 dD_at_q = np.array(dD_at_q)
 
+                rot_eigvect, rot_dD_at_q = self.rotate_eigenvectors(eigval.real, eigvect, dD)
+
                 for v in range(nmode):
 
                     if eigval[v].real < tol12:
                         gru[i,v] = 0
+                        gru_rot[i, v] = 0
                     else:
                         gru[i,v] = -V0*dD_at_q[v]/(2*np.abs(eigval[v].real)*dV)
+                        gru_rot[i,v] = -V0*rot_dD_at_q[v]/(2*np.abs(eigval[v].real)*dV)
+
 
             gru = np.expand_dims(gru, axis=0)
+            self.gru_rot = np.expand_dims(gru_rot, axis=0)
 
         if self.symmetry == 'hexagonal':
 
             gru = np.zeros((2, nqpt, nmode))
+            gru_rot = np.zeros_like(gru)
             dplus =  [2, 5]
             d0 = [1, 4]
             dminus = [0, 3] # put this in a function...
@@ -2853,6 +2978,8 @@ class Gruneisen(FreeEnergy):
                     # end loop on volumes
                     dD_at_q = []
 
+                    rot_eigvect, rot_dD_at_q = self.rotate_eigenvectors(eigval.real, eigvect, dD)
+
                     for v in range(nmode):
 
                         vect = eigvect[:,v]
@@ -2864,13 +2991,45 @@ class Gruneisen(FreeEnergy):
 
                         if eigval[v].real < tol12:
                             gru[a,i,v] = 0
+                            gru_rot[a, i, v] = 0
                         else:
                             if a == 0:
                                 gru[a,i,v] = -V0[a]*dD_at_q[v]/(4*np.abs(eigval[v].real)*dV[a])
+                                gru_rot[a,i,v] = -V0[a]*rot_dD_at_q[v]/(4*np.abs(eigval[v].real)*dV[a])
                             elif a == 1:
                                 gru[a,i,v] = -V0[a]*dD_at_q[v]/(2*np.abs(eigval[v].real)*dV[a])
+                                gru_rot[a, i,v] = -V0[a]*rot_dD_at_q[v]/(2*np.abs(eigval[v].real)*dV[a])
+
+            self.gru_rot = gru_rot
 
         return gru
+
+    def rotate_eigenvectors(self, eigval, eigvect, dD):
+        rot_eigvect = np.zeros_like(eigvect)
+        eigval_dD = np.zeros_like(eigval)
+        for deg in self.degenerate_sets(eigval):
+            dD_part = np.dot(np.transpose(np.conjugate(eigvect[:, deg])), np.dot(dD, eigvect[:, deg]))
+            eigval_dD[deg], eigvect_dD = np.linalg.eigh(dD_part)
+            rot_eigvect[:, deg] = np.dot(eigvect[:, deg], eigvect_dD) # why not vdot??
+        return rot_eigvect, eigval_dD
+
+    def degenerate_sets(self, freq, cutoff=1E-12):
+        indices = []
+        done = []
+        for i in range(len(freq)):
+            if i in done:
+                continue
+            else:
+                f_set = [i]
+                done.append(i)
+            for j in range(i+1, len(freq)):
+                if (np.abs(freq[f_set] - freq[j]) < cutoff).any():
+                        f_set.append(j)
+                        done.append(j)
+            indices.append(f_set[:])
+
+        #print('indices:',indices)
+        return indices
 
 
     def write_nc(self):
@@ -2901,9 +3060,22 @@ class Gruneisen(FreeEnergy):
             data[:,:] = self.acell_via_gruneisen[:,:]
             data.units = 'Bohr radius'
 
+            data = dts.createVariable('acell_from_gruneisen_from_dynmat','d', ('number_of_lattice_parameters','number_of_temperatures'))
+            data[:,:] = self.acell_via_gruneisen_from_dynmat[:,:]
+            data.units = 'Bohr radius'
+
             data = dts.createVariable('acell_from_gruneisen_plushalf','d', ('number_of_lattice_parameters','number_of_temperatures'))
             data[:,:] = self.acell_plushalf[:,:]
             data.units = 'Bohr radius'
+
+            data = dts.createVariable('acell_from_gruneisen_plushalf_from_dynmat','d', ('number_of_lattice_parameters','number_of_temperatures'))
+            data[:,:] = self.acell_plushalf_from_dynmat[:,:]
+            data.units = 'Bohr radius'
+
+            data = dts.createVariable('c_over_a', 'd', ('number_of_temperatures'))
+            if self.symmetry == 'hexagonal':
+                data[:] = self.c_over_a[:]
+            data.units = 'Unitless'
 
             data = dts.createVariable('volume','d', ('number_of_volumes','four'))
             data[:,:] = self.volume[:,:]
@@ -2924,6 +3096,10 @@ class Gruneisen(FreeEnergy):
 
             data = dts.createVariable('alpha','d', ('number_of_lattice_parameters','number_of_temperatures'))
             data[:,:] = self.alpha[:,:]
+            data.units = 'K^-1'
+
+            data = dts.createVariable('alpha_from_dynmat','d', ('number_of_lattice_parameters','number_of_temperatures'))
+            data[:,:] = self.alpha_from_dynmat[:,:]
             data.units = 'K^-1'
 
             data = dts.createVariable('discrete_room_temp_alpha','d', ('number_of_lattice_parameters','number_of_temperatures'))
@@ -2957,6 +3133,8 @@ class Gruneisen(FreeEnergy):
             data = dts.createVariable('gruneisen_parameters_from_dynmat', 'd', ('number_of_lattice_parameters', 'number_of_qpoints', 'number_of_modes'))
             data[:, :, :] = self.gruneisen_from_dynmat[:, :, :]
 
+            data = dts.createVariable('gruneisen_parameters_from_dynmat_rot', 'd', ('number_of_lattice_parameters', 'number_of_qpoints', 'number_of_modes'))
+            data[:, :, :] = self.gru_rot[:, :, :]
 
             data = dts.createVariable('omega_equilibrium', 'd', ('number_of_qpoints', 'number_of_modes'))
             data[:, :] = self.omega[1, :, :]
@@ -3039,6 +3217,501 @@ class Gruneisen(FreeEnergy):
 # 
 #                 f.close()
 
+
+class GruneisenPath(FreeEnergy):
+
+    #Input files
+    ddb_flists = None
+    out_flists = None
+    elastic_fname = None
+
+    #Parameters
+    wtq = [1.0]
+    pressure = 0.0
+    pressure_gpa= 0.0 
+
+    verbose = False
+    bulk_modulus = None
+
+
+    def __init__(self,
+
+        rootname,
+        units,
+        symmetry,
+
+        ddb_flists = None,
+        out_flists = None,
+        elastic_fname = None,
+
+        #wtq = [1.0],
+
+        bulk_modulus = None,
+        pressure = 0.0,
+        pressure_gpa = 0.0,
+        pressure_units = None,
+        bulk_modulus_units = None,
+        #manual_correction = False,
+        verbose = False,
+
+        #eos_type = 'Murnaghan',
+
+        **kwargs):
+
+
+        print('Computing Gruneisen parameters on qpath')
+        if not ddb_flists:
+            raise Exception('Must provide a list of files for ddb_flists')
+        if not out_flists:
+            raise Exception('Must provide a list of files for out_flists')        
+
+        if len(out_flists) != np.shape(ddb_flists)[0]:
+            raise Exception('ddb_flists and out_flists must have the same number of volumes')
+
+
+        #Set input files
+        self.ddb_flists = ddb_flists
+        self.out_flists = out_flists
+        self.elastic_fname = elastic_fname
+        self.symmetry = symmetry
+        if not self.symmetry:
+            raise Exception('Symmetry type must be specified')
+
+        if self.symmetry=='hexagonal':
+            if not self.elastic_fname:
+                raise Exception('For hexagonal system, elastic compliance tensor (computed with anaddb) must be provided as a .nc file.')
+
+        super(GruneisenPath,self).__init__(rootname,units)
+        #self.check_anaddb = check_anaddb
+        #self.manual_correction = manual_correction
+        self.verbose = verbose
+
+        #self.temperature = temperature
+        #self.ntemp = len(self.temperature) 
+        
+        self.pressure_units = pressure_units
+        self.pressure = pressure
+
+        if self.pressure_units == 'GPa':
+            self.pressure_gpa = self.pressure
+            self.pressure = self.pressure*cst.gpa_to_habo3
+        else:
+            self.pressure_gpa == self.pressure*cst.habo3_to_gpa
+
+        print('External pressure is {} GPa'.format(self.pressure_gpa))
+
+        if bulk_modulus:
+            if bulk_modulus_units == 'GPa':
+                self.bulk_modulus = bulk_modulus*cst.gpa_to_habo3
+            elif bulk_modulus_units == 'HaBo3':
+                self.bulk_modulus = bulk_modulus
+            else:
+                raise Exception('Bulk modulus units must be GPa or Ha/bohr^3')
+################# This could be in a function??
+        ##Define EOS type
+        #self.eos_type = eos_type
+        #if self.eos_type not in self.eos_list:
+        #    raise Exception('EOS type must be one of the following: {}'.format(self.eos_list))
+
+        # set parameter space dimensions
+        '''why the hell does the shape sometimes work and sometimes not???'''
+#        nvol, nqpt = np.shape(self.ddb_flists)
+        nvol, nqpt = len(self.ddb_flists), len(self.ddb_flists[0])
+        #self.free_energy = np.zeros((nvol,self.ntemp))
+        #self.gibbs_free_energy = np.zeros((nvol,self.ntemp))
+
+        self.qred = np.zeros((nqpt,3))
+
+        self.volume = np.empty((nvol,4)) # 1st index = data index, 2nd index : total cell volume, (a1,a2,a3)
+
+        # Check that all qpt lists have the same lenght, and that it is equal to the number of wtq
+        for v in range(nvol):
+            if len(ddb_flists[v][:]) != len(ddb_flists[0][:]):
+                raise Exception('all ddb lists must have the same number of files.\n List index {} has {} entries while list index 0 has {}.'.format(v,len(ddb_flists[v][:]),len(ddb_flists[0][:])))
+
+        #self.set_weights(wtq)
+
+        # Loop on all volumes
+        for v in range(nvol):
+
+            print('\n\nReading data from {}'.format(out_flists[v]))
+           # Open OUTfile
+            gs = OutFile(out_flists[v])
+            self.volume[v,0] = gs.volume
+            self.volume[v,1:] = gs.acell
+
+            # Check how many lattice parametersv are inequivalent and reduce matrices 
+            # see EPC module, qptanalyser function get_se_indices and reduce_array
+            # I do the acell equivalence check only one. There should be no need to check this, as all datasets must describe the same material!
+
+        # what would be the right atol (absolute tolerance) for 2 equivalent lattice parameters? 1E-4, is it too loose?
+            if v==0: # REDONDANT SI JE SPECIFIE EXPLICITEMENT LE TYPE DE SYMETRIE... IL VA FALLOIR FAIRE LES 7 GROUPES ?? 
+                self.distinct_acell = self.reduce_acell(self.volume[v,1:])
+                nmode = 3*gs.natom
+                self.natom = gs.natom
+                self.omega = np.zeros((nvol,nqpt,nmode))
+                self.eigvect = np.zeros((nvol, nqpt, nmode, nmode), dtype=complex)
+
+            # for each qpt:
+            # Redundent if I do it in the function...
+            for i in range(nqpt):
+
+                # open the ddb file
+                ddb = DdbFile(self.ddb_flists[v][i])
+                if  v==0:
+                    self.qred[i,:] = ddb.qred
+                #nmode = 3*ddb.natom
+
+                # Check if qpt is Gamma
+                is_gamma = ddb.is_gamma
+
+                # diagonalize the dynamical matrix and get the eigenfrequencies
+                if is_gamma:
+                    ddb.compute_dynmat(asr=True)
+                else:
+                    ddb.compute_dynmat()
+                        ##### CHECK WITH GABRIEL IF I SHOULD HAVE LOTO SPLITTING AT GAMMA (WHERE DOES HIS CODE TREAT THE ELECTRIC FIELD PERTURBAITON IN THE DDB AT GAMMA???)
+                        ### I should maybe implement the proper ASR corrections, like in anaddb and phonopy...
+
+                # Store frequencies for Gruneisen parameters
+                self.omega[v,i,:] = ddb.omega
+
+        ### End of loop on volumes, all data has been read ###
+
+        # Read elastic compliance from file
+        if self.elastic_fname:
+            elastic = ElasticFile(self.elastic_fname)
+            self.compliance = elastic.compliance_relaxed
+            self.compliance_rigid = elastic.compliance_clamped
+
+            bmod = self.get_bulkmodulus_from_elastic(elastic.stiffness_relaxed)
+            bmod2 = self.get_bulkmodulus_from_elastic(elastic.stiffness_clamped)
+            self.bulkmodulus_from_elastic = bmod
+            ##FIX ME: what to do i we want to use th inputted (experimental) bulk modulus?)
+            if self.symmetry == 'cubic':
+                if self.bulk_modulus is None:
+                    print('Using bulk modulus from elastic constants.')
+                    self.bulk_modulus = self.bulkmodulus_from_elastic*cst.gpa_to_habo3
+                    self.bulk_modulus_rigid = bmod2*cst.gpa_to_habo3
+                else:
+                    print('Using bulk modulus from input file.')
+
+            if self.verbose:
+                print('Bulk modulus from elastic constants = {:>7.3f} GPa'.format(bmod))
+                print('Bulk modulus from elastic constants (clamped) = {:>7.3f} GPa'.format(bmod2))
+
+                print('Elastic constants:')
+                print('c11 = {}, c33 = {}, c12 = {}, c13 = {} GPa'.format(elastic.stiffness_relaxed[0,0],elastic.stiffness_relaxed[2,2],elastic.stiffness_relaxed[0,1],elastic.stiffness_relaxed[0,2]))
+                print('Clamped:')
+                print('c11 = {}, c33 = {}, c12 = {}, c13 = {} GPa'.format(elastic.stiffness_clamped[0,0],elastic.stiffness_clamped[2,2],elastic.stiffness_clamped[0,1],elastic.stiffness_clamped[0,2]))
+
+                print('Compliance constants:')
+                print('s11 = {}, s33 = {}, s12 = {}, s13 = {} GPa^-1'.format(elastic.compliance_relaxed[0,0],elastic.compliance_relaxed[2,2],elastic.compliance_relaxed[0,1],elastic.compliance_relaxed[0,2]))
+                print('Clamped:')
+                print('s11 = {}, s33 = {}, s12 = {}, s13 = {} GPa^-1'.format(elastic.compliance_clamped[0,0],elastic.compliance_clamped[2,2],elastic.compliance_clamped[0,1],elastic.compliance_clamped[0,2]))
+
+
+
+        # Get Gruneisen parameters, according to crystal symmetry
+
+        ### Add a check for homogenious acell increase (for central finite difference)
+        self.equilibrium_volume = self.volume[1,:]
+
+        #self.gruneisen = self.get_gruneisen(nqpt,nmode,nvol)
+        self.gruneisen_from_dynmat = self.get_gruneisen_from_dynmat(nqpt,nmode,nvol)
+
+
+    def get_gruneisen_from_dynmat(self,nqpt,nmode,nvol):
+
+        # for now, I reopen all files, but later on change the loop ordering (anyway, it should not do everything linearly, but rather use functions depending of input parameters
+        if self.symmetry == 'cubic':
+
+            gru = np.zeros((nqpt,nmode))
+            gru_rot = np.zeros_like(gru)
+            dplus =  2
+            d0 = 1
+            dminus = 0 # put this in a function
+            # Get the linear cell dimension change, not volumic
+            # gamma^a = gamma^V/3
+            dV = self.volume[dplus,1] - self.volume[dminus,1]
+            V0 = self.volume[d0,1]
+
+            previous_eigvect = None
+            previous_eigvect_rot = None
+            band_order = np.arange(nmode)
+            band_order2 = np.arange(nmode)
+            band_order_rot = np.arange(nmode)
+            band_order_rot2 = np.arange(nmode)
+            omega_equilibrium = np.empty((nqpt, nmode))
+            omega_equilibrium_rot = np.empty((nqpt, nmode))
+
+            for i in range(nqpt):
+            #for i in range(5):
+                #print('for qpt {}'.format(i+1))
+                dD = np.zeros((nmode,nmode),dtype=complex)
+                for vol in range(nvol):
+
+                    # open the ddb file
+                    ddb = DdbFile(self.ddb_flists[vol][i])
+
+                    # Check if qpt is Gamma
+                    is_gamma = ddb.is_gamma
+
+                    dynmat = ddb.get_mass_scaled_dynmat_cart()
+
+                    if vol==dplus:
+                        dD = dD + dynmat
+                    if vol==dminus:
+                        dD = dD - dynmat
+                    if vol==d0:
+                        eigval, eigvect = np.linalg.eigh(dynmat)
+
+                        if is_gamma:
+                            eigval[0] = 0.0
+                            eigval[1] = 0.0
+                            eigval[2] = 0.0
+
+                        for ieig,eig in enumerate(eigval):
+                            if eig < 0.0:
+                                warnings.warn('Negative eigenvalue changed to 0')
+                                eigval[ieig] = 0.0
+
+                        omega_equilibrium[i, :] = np.sqrt(np.abs(eigval)) * np.sign(eigval)
+                        omega_equilibrium_rot[i, :] = np.sqrt(np.abs(eigval)) * np.sign(eigval)
+
+                # end loop on volumes
+                dD_at_q = []
+
+                # Look up how to follow the modes, by computing the projections
+                # this should be done before apprnding dD_at_q?
+                # for a given qpt, compare eigvect to prev_eigvect
+                # Reorder the elements of dD_at_q (and omega?) according to the highest projection coefficient
+                # What to do if the path is discontinuous? add a 'isclose' to compare the qpoints?
+                for v in range(nmode):
+                    vect = eigvect[:,v]
+                    dD_at_q.append(np.vdot(np.transpose(vect), np.dot(dD,vect)).real)   
+
+                dD_at_q = np.array(dD_at_q)
+
+                # Estimate band connexion from projections
+                #print('no rotation')
+                if previous_eigvect is not None:
+                    band_order, band_order2 = self.estimate_band_connection(previous_eigvect, eigvect, band_order, band_order2)
+                    #print(band_order)
+                #print('with rotation')
+                rot_eigvect, rot_dD_at_q = self.rotate_eigenvectors(eigval.real, eigvect, dD)
+                if previous_eigvect_rot is not None:
+                    band_order_rot, band_order_rot2 = self.estimate_band_connection(previous_eigvect_rot, rot_eigvect, band_order_rot, band_order_rot2)
+                    #print(band_order_rot)
+                previous_eigvect = eigvect
+                previous_eigvect_rot = rot_eigvect
+                eigval = eigval[band_order]
+                eigval_rot = eigval[band_order_rot]
+                dD_at_q = dD_at_q[band_order]
+                rot_dD_at_q = rot_dD_at_q[band_order_rot]
+                omega_equilibrium[i, :] = omega_equilibrium[i, band_order]
+                omega_equilibrium_rot[i, :] = omega_equilibrium_rot[i, band_order_rot]
+
+                # test the rotate_eigvect...
+                # define omega from eigvals
+                for v in range(nmode):
+
+                    if eigval[v].real < tol12:
+                        gru[i,v] = 0
+                    else:
+                        gru[i,v] = -V0*dD_at_q[v]/(2*np.abs(eigval[v].real)*dV)
+
+                    if eigval_rot[v].real < tol12:
+                        gru_rot[i,v] = 0
+                    else:
+                        gru_rot[i,v] = -V0*rot_dD_at_q[v]/(2*np.abs(eigval_rot[v].real)*dV)
+
+            gru = np.expand_dims(gru, axis=0)
+            self.gru_rot = np.expand_dims(gru_rot, axis=0)
+            self.omega_equilibrium = omega_equilibrium
+            self.omega_equilibrium_rot = omega_equilibrium_rot
+
+
+        if self.symmetry == 'hexagonal':
+
+            gru = np.zeros((2, nqpt, nmode))
+            dplus =  [2, 5]
+            d0 = [1, 4]
+            dminus = [0, 3] # put this in a function...
+        
+            dV = [self.volume[dplus[0],1] - self.volume[dminus[0],1], self.volume[dplus[1],3] - self.volume[dminus[1],3]]
+            V0 = [self.volume[d0[0], 1], self.volume[d0[1], 3]]
+
+            for a in range(2):
+
+                for i in range(nqpt):
+                    dD = np.zeros((nmode,nmode),dtype=complex)
+                    for vol in range(3):
+
+                        ivol = 3*a + vol
+                        # open the ddb file
+                        ddb = DdbFile(self.ddb_flists[ivol][i])
+
+                        # Check if qpt is Gamma
+                        is_gamma = ddb.is_gamma
+
+                        dynmat = ddb.get_mass_scaled_dynmat_cart()
+
+                        if ivol==dplus[a]:
+                            dD = dD + dynmat
+                        if ivol==dminus[a]:
+                            dD = dD - dynmat
+                        if ivol==d0[a]:
+                            eigval, eigvect = np.linalg.eigh(dynmat)
+                            omega = np.sqrt(np.abs(eigval)) * np.sign(eigval)
+
+                            if is_gamma:
+                                eigval[0] = 0.0
+                                eigval[1] = 0.0
+                                eigval[2] = 0.0
+
+                            for ieig,eig in enumerate(eigval):
+                                if eig < 0.0:
+                                    warnings.warn('Negative eigenvalue changed to 0')
+                                    eigval[ieig] = 0.0
+
+                    # end loop on volumes
+                    dD_at_q = []
+
+                    for v in range(nmode):
+
+                        vect = eigvect[:,v]
+                        dD_at_q.append(np.vdot(np.transpose(vect), np.dot(dD,vect)).real)   
+
+                    dD_at_q = np.array(dD_at_q)
+
+                    for v in range(nmode):
+
+                        if eigval[v].real < tol12:
+                            gru[a,i,v] = 0
+                        else:
+                            if a == 0:
+                                gru[a,i,v] = -V0[a]*dD_at_q[v]/(4*np.abs(eigval[v].real)*dV[a])
+                            elif a == 1:
+                                gru[a,i,v] = -V0[a]*dD_at_q[v]/(2*np.abs(eigval[v].real)*dV[a])
+        
+        return gru
+
+    def estimate_band_connection(self, previous_eigvect, current_eigvect, previous_order, previous_order2):
+
+        dim = len(previous_order)
+        band_order = []
+        connexion_order = []
+        overlap_matrix = np.abs(np.dot(np.transpose(np.conjugate(previous_eigvect)), current_eigvect))
+
+        for v in range(dim):
+            #Overlap of previous_eigvect[:, v] with current eigenvectors
+            overlaps = np.abs(np.dot(np.transpose(np.conjugate(previous_eigvect[:, v])), current_eigvect))
+            #print(overlaps)
+            # check also if the projections are more 'clear' (less mixed) if I add the 
+            # rotate_eigenvectors function (write it as is, check what it does)
+            # check also how to add the LoTo contribution to the frequencies 
+            for j in reversed(range(dim)):
+                '''why reversed?!?'''
+                if j in band_order:
+                    overlaps[j] = 0
+
+            band_order.append(np.argmax(overlaps))
+
+        for olaps in overlap_matrix:
+            maxval = 0
+            for j in reversed(range(dim)):
+                val = olaps[j]
+                if j in connexion_order:
+                    continue
+                if val > maxval:
+                    maxval = val
+                    maxindex = j
+            connexion_order.append(maxindex)
+
+
+        current_order = [band_order[x] for x in previous_order]
+        current_order2 = [connexion_order[x] for x in previous_order2]
+        if current_order != current_order2:
+            print('current_order', current_order)
+            print('phonopy algo', current_order2)
+
+        return current_order, current_order2
+
+    def rotate_eigenvectors(self, eigval, eigvect, dD):
+        rot_eigvect = np.zeros_like(eigvect)
+        eigval_dD = np.zeros_like(eigval)
+        for deg in self.degenerate_sets(eigval):
+            dD_part = np.dot(np.transpose(np.conjugate(eigvect[:, deg])), np.dot(dD, eigvect[:, deg]))
+            eigval_dD[deg], eigvect_dD = np.linalg.eigh(dD_part)
+            rot_eigvect[:, deg] = np.dot(eigvect[:, deg], eigvect_dD) # why not vdot??
+        return rot_eigvect, eigval_dD
+
+    def degenerate_sets(self, freq, cutoff=1E-12):
+        indices = []
+        done = []
+        for i in range(len(freq)):
+            if i in done:
+                continue
+            else:
+                f_set = [i]
+                done.append(i)
+            for j in range(i+1, len(freq)):
+                if (np.abs(freq[f_set] - freq[j]) < cutoff).any():
+                        f_set.append(j)
+                        done.append(j)
+            indices.append(f_set[:])
+
+        #print('indices:',indices)
+        return indices
+
+    def write_nc(self):
+
+        nc_outfile = 'OUT/{}_GRUNPATH.nc'.format(self.rootname)
+
+        #  First, write output in netCDF format
+        create_directory(nc_outfile)
+
+        with nc.Dataset(nc_outfile, 'w') as dts:
+
+             #Define the type of calculation:
+            dts.description = 'Gruneisen Path'
+
+            dts.createDimension('number_of_lattice_parameters', len(self.distinct_acell))
+            dts.createDimension('one', 1)
+            dts.createDimension('three', 3)
+            dts.createDimension('four', 4)
+            dts.createDimension('number_of_qpoints', self.gruneisen_from_dynmat.shape[1])
+            dts.createDimension('number_of_modes', self.gruneisen_from_dynmat.shape[2])
+            dts.createDimension('number_of_volumes', np.shape(self.volume)[0])
+
+            data = dts.createVariable('volume','d', ('number_of_volumes','four'))
+            data[:,:] = self.volume[:,:]
+            data.units = 'bohr^3'
+
+            data = dts.createVariable('equilibrium_volume','d', ('four'))
+            data[:] = self.equilibrium_volume[:]
+            data.units = 'bohr^3'
+
+            data = dts.createVariable('bulk_modulus_habo3','d',('one'))
+            data[:] = self.bulkmodulus_from_elastic*cst.gpa_to_habo3
+
+            data = dts.createVariable('gruneisen_parameters_from_dynmat', 'd', ('number_of_lattice_parameters', 'number_of_qpoints', 'number_of_modes'))
+            data[:, :, :] = self.gruneisen_from_dynmat[:, :, :]
+
+            data = dts.createVariable('omega_equilibrium', 'd', ('number_of_qpoints', 'number_of_modes'))
+            data[:, :] = self.omega_equilibrium[ :, :]
+            data.units = 'Hartree'
+
+            data = dts.createVariable('reduced_coordinates_of_qpoints', 'd', ('number_of_qpoints', 'three'))
+            data[:,:] = self.qred[:, :]
+
+            data = dts.createVariable('gruneisen_parameters_from_dynmat_rot', 'd', ('number_of_lattice_parameters', 'number_of_qpoints', 'number_of_modes'))
+            data[:, :, :] = self.gru_rot[:, :, :]
+
+            data = dts.createVariable('omega_equilibrium_rot', 'd', ('number_of_qpoints', 'number_of_modes'))
+            data[:, :] = self.omega_equilibrium_rot[ :, :]
+            data.units = 'Hartree'
 
 class Static(object):
 
@@ -3129,7 +3802,7 @@ class Static(object):
 
             plt.show()
 
-        print(popt[2]/cst.gpa_to_habo3)
+        print('Bulk modulus from static EOS : {} GPa'.format(popt[2]/cst.gpa_to_habo3))
         
         return popt[2], popt[3], popt[0], popt[1]
 
@@ -3290,9 +3963,11 @@ def compute(
         pressure_units = None,
         eos_type = 'Murnaghan',
         use_axial_eos = False,
+        tmin_slope = 500,
 
         expansion = True,
         gruneisen = False,
+        gruneisen_path = False,
         bulkmodulus = False,
         dedp = False,
         initial_params = None,
@@ -3304,7 +3979,7 @@ def compute(
         **kwargs):
 
     # Choose appropriate type of free energy 
-
+    # FIX ME this should just be called Static, or something like that...
     if bulkmodulus:
         
         static_calc = Static(
@@ -3325,7 +4000,36 @@ def compute(
         ## write static output files
         static_calc.write_output()
         static_calc.write_netcdf()
- 
+
+    # Compute Gruneisen parameters on a qpath
+    if gruneisen_path:
+         calc = GruneisenPath(
+                out_flists = out_flists, 
+                ddb_flists = ddb_flists,
+    
+                rootname = rootname,
+                symmetry = symmetry,
+    
+                #wtq = wtq,
+                #temperature = temperature,
+                units = units,
+                #check_anaddb = check_anaddb,
+                elastic_fname = elastic_fname,
+                pressure = pressure,
+                pressure_units = pressure_units,
+    
+                bulk_modulus = bulk_modulus,
+                bulk_modulus_units = bulk_modulus_units,
+
+                #manual_correction = manual_correction,
+                verbose = verbose,
+
+                #eos_type = eos_type,
+
+                **kwargs)
+
+         calc.write_nc()
+
     # Compute thermal expansion
     if expansion:
     ## ADD OPTIONS, TO MINIMIZE FREE ENERGY OR USE GRUNEISEN PARAMETERS

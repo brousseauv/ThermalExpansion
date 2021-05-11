@@ -64,3 +64,11 @@ def paraboloid_2D(mesh, a0,A,c0,C,B):
     z = (x-a0)**2/A**2 + (y-c0)**2/C**2 + B
 
     return z
+
+def ellipsoid_2D(mesh, A, B, C, D, E, F):
+
+    x,y = mesh
+
+    z = A*x**2 + B*x*y + C*y**2 + D*x + E*y + F
+
+    return z
