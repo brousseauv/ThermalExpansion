@@ -829,7 +829,7 @@ class GibbsFreeEnergy(FreeEnergy):
 
         wtq = [1.0],
         temperature = np.arange(0,300,50),
-        tmin_slope = 500,
+        tmin_slope = 700,
 
         check_anaddb = False,
 
@@ -1011,11 +1011,12 @@ class GibbsFreeEnergy(FreeEnergy):
         # Minimize F, according to crystal symmetry
         # The fitting parameters will be stored in the output file, so that the fitting can be plotted afterwards.
         self.temperature_dependent_acell = self.minimize_free_energy()
-        self.alpha= self.get_alpha_from_acell(self.temperature_dependent_acell)
-        self.discrete_alpha= self.discrete_alpha_vs_reftemp(self.temperature_dependent_acell, 0.)
-        self.discrete_room_temp_alpha= self.discrete_alpha_vs_reftemp(self.temperature_dependent_acell, 293.)
-        self.room_temp_alpha= self.get_alpha_vs_reftemp(self.temperature_dependent_acell, 293.)
+        self.alpha = self.get_alpha_from_acell(self.temperature_dependent_acell)
+        self.discrete_alpha = self.discrete_alpha_vs_reftemp(self.temperature_dependent_acell, 0.)
+        self.discrete_room_temp_alpha = self.discrete_alpha_vs_reftemp(self.temperature_dependent_acell, 293.)
+        self.room_temp_alpha = self.get_alpha_vs_reftemp(self.temperature_dependent_acell, 293.)
         self.compute_specific_heat(nqpt, nmode)
+        self.delta_acell_from_high_t_slope = self.get_hight_slope()
 
         
     def minimize_free_energy(self):
@@ -1362,6 +1363,41 @@ class GibbsFreeEnergy(FreeEnergy):
 
         return alpha
 
+    def get_hight_slope(self):
+
+        # Linear fit of the hight T Delta a/a_0 slope
+        if self.tmin_slope > self.temperature[-1]:
+            print('High T slope intersect at T=0 will not be computed as Tmax = {} < Tmin_slope = {} K'.format(self.temperature[-1], self.tmin_slope))
+            return None
+        
+        find_t, = np.where(self.temperature==self.tmin_slope)
+        if len(find_t) == 0:
+            temp_index = np.argmin(np.where(self.temperature > self.tmin_slope))
+        else: 
+            temp_index = find_t[0]
+
+        temp = self.temperature[temp_index:]
+
+        if len(temp) < 5:
+            print('High T slope intersect at T=0  will not be computed as there are only {} temperatures above Tmin_slope = {} K'.format(len(temp), self.tmin_slope))
+            return None
+
+        n = np.shape(self.temperature_dependent_acell)[0]
+        if n > 2:
+            raise Exception('There are more than 2 independent lattice parameters. How did you actually manage to get here?!?')
+        slope = np.zeros((n))
+
+        da_a = (self.temperature_dependent_acell[0,temp_index:] - self.equilibrium_volume[1]*np.ones_like(temp))/self.equilibrium_volume[1]
+        slope[0] = -np.polyfit(temp, da_a, 1)[1]
+
+        if n == 2:
+            dc_c = (self.temperature_dependent_acell[1,temp_index:] - self.equilibrium_volume[3]*np.ones_like(temp))/self.equilibrium_volume[3]
+            slope[1] = -np.polyfit(temp, dc_c, 1)[1]
+
+        print('dacell/acell_0 from high T slopes above {}K: {}'.format(self.tmin_slope, slope))
+        return slope
+
+
     def write_nc(self):
 
         nc_outfile = 'OUT/{}_TE.nc'.format(self.rootname)
@@ -1378,6 +1414,7 @@ class GibbsFreeEnergy(FreeEnergy):
             dts.createDimension('number_of_lattice_parameters', len(self.distinct_acell))
             dts.createDimension('number_of_volumes', np.shape(self.free_energy)[0])
             dts.createDimension('four', 4)
+            dts.createDimension('one', 1)
             dts.createDimension('number_of_fit_parameters', np.shape(self.fit_params)[0])
 
             data = dts.createVariable('temperature','d', ('number_of_temperatures'))
@@ -1451,6 +1488,16 @@ class GibbsFreeEnergy(FreeEnergy):
             data = dts.createVariable('specific_heat','d',('number_of_temperatures'))
             data[:] = self.cv
             data.units = 'Ha/K'
+
+            data = dts.createVariable('delta_acell_on_acell0_from_high_t_slope', 'd', ('number_of_lattice_parameters'))
+            if self.delta_acell_from_high_t_slope is not None:
+                data[:] = self.delta_acell_from_high_t_slope[:]
+            data.units = 'unitless'
+
+            data = dts.createVariable('tmin_for_high_t_slope', 'd', ('one'))
+            data[:] = self.tmin_slope
+            data.units = 'Kelvin'
+
 
 
     def write_acell(self):
@@ -1530,6 +1577,7 @@ class Gruneisen(FreeEnergy):
 
         wtq = [1.0],
         temperature = np.arange(0,300,50),
+        tmin_slope = 700,
 
         check_anaddb = False,
 
@@ -1575,7 +1623,8 @@ class Gruneisen(FreeEnergy):
 
         self.temperature = temperature
         self.ntemp = len(self.temperature) 
-        
+        self.tmin_slope = tmin_slope
+
         self.pressure_units = pressure_units
         self.pressure = pressure
 
@@ -1767,6 +1816,8 @@ class Gruneisen(FreeEnergy):
         self.discrete_alpha = self.discrete_alpha_vs_reftemp(self.acell_via_gruneisen, 0.)
         self.room_temp_alpha= self.get_alpha_vs_reftemp(self.acell_via_gruneisen, 293.)
         
+        self.delta_acell_from_high_t_slope = self.get_hight_slope()
+
 
     def minimize_free_energy_from_eos(self):
         # Minimize_free_energy, with an EOS, to obtain the fitting parameters E0, V0, B0, B0'
@@ -3031,6 +3082,42 @@ class Gruneisen(FreeEnergy):
         #print('indices:',indices)
         return indices
 
+    def get_hight_slope(self):
+
+        # Linear fit of the hight T Delta a/a_0 slope
+        if self.tmin_slope > self.temperature[-1]:
+            print('High T slope intersect at T=0 will not be computed as Tmax = {} < Tmin_slope = {} K'.format(self.temperature[-1], self.tmin_slope))
+            return None
+        
+        find_t, = np.where(self.temperature==self.tmin_slope)
+        if len(find_t) == 0:
+            temp_index = np.argmin(np.where(self.temperature > self.tmin_slope))
+        else: 
+            temp_index = find_t[0]
+
+        temp = self.temperature[temp_index:]
+
+        if len(temp) < 4:
+            print('High T slope intersect at T=0  will not be computed as there are only {} temperatures above Tmin_slope = {} K'.format(len(temp), self.tmin_slope))
+            return None
+
+        # I will use the gruneisen_bare for now... 
+        # But this variable is sort of a duplicate, I could reconstruct it from the shifted a0
+        # But it need to be tested, to be sure
+        n = np.shape(self.acell_via_gruneisen)[0]
+        if n > 2:
+            raise Exception('There are more than 2 independent lattice parameters. How did you actually manage to get here?!?')
+        slope = np.zeros((n))
+
+        da_a = (self.acell_via_gruneisen[0,temp_index:] - self.equilibrium_volume[1]*np.ones_like(temp))/self.equilibrium_volume[1]
+        slope[0] = -np.polyfit(temp, da_a, 1)[1]
+
+        if n == 2:
+            dc_c = (self.acell_via_gruneisen[1,temp_index:] - self.equilibrium_volume[3]*np.ones_like(temp))/self.equilibrium_volume[3]
+            slope[1] = -np.polyfit(temp, dc_c, 1)[1]
+
+        print('dacell/acell_0 from high T slopes above {}K: {}'.format(self.tmin_slope, slope))
+        return slope
 
     def write_nc(self):
 
@@ -3139,6 +3226,16 @@ class Gruneisen(FreeEnergy):
             data = dts.createVariable('omega_equilibrium', 'd', ('number_of_qpoints', 'number_of_modes'))
             data[:, :] = self.omega[1, :, :]
             data.units = 'Hartree'
+
+            data = dts.createVariable('delta_acell_on_acell0_from_high_t_slope', 'd', ('number_of_lattice_parameters'))
+            if self.delta_acell_from_high_t_slope is not None:
+                data[:] = self.delta_acell_from_high_t_slope[:]
+            data.units = 'unitless'
+
+            data = dts.createVariable('tmin_for_high_t_slope', 'd', ('one'))
+            data[:] = self.tmin_slope
+            data.units = 'Kelvin'
+
 
 
 
@@ -3963,7 +4060,7 @@ def compute(
         pressure_units = None,
         eos_type = 'Murnaghan',
         use_axial_eos = False,
-        tmin_slope = 500,
+        tmin_slope = 700,
 
         expansion = True,
         gruneisen = False,
@@ -4048,6 +4145,7 @@ def compute(
 ## FIX ME : IF THERE WAS DATA FOR BULK MODULUS, USE IT!! OR, SIMPLY COMPUTE IT FROM DDB VOLUME DATA...                    
                     bulk_modulus = bulk_modulus,
                     bulk_modulus_units = bulk_modulus_units,
+                    tmin_slope = tmin_slope,
     
                     equilibrium_index = equilibrium_index,
                     verbose = verbose,
