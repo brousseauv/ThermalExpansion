@@ -59,6 +59,7 @@ def birch_murnaghan_EV_axial2D(mesh,a0,c0,E0,K0,K0p):
 
 def paraboloid_2D(mesh, a0,A,c0,C,B):
 
+#    x,y = mesh[0:int(len(mesh)/2)], mesh[int(len(mesh)/2):]
     x,y = mesh
 
     z = (x-a0)**2/A**2 + (y-c0)**2/C**2 + B

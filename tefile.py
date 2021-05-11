@@ -25,8 +25,11 @@ class FreeEnergyFile(EpcFile):
             self.temp_units = dts.variables['temperature'].getncattr('units')
 
             self.acell = dts.variables['acell_from_gibbs'][:, :] * bohr_to_ang
-            self.free_energy = dts.variables['free_energy'][:] * ha_to_ev  # in eV
-            self.volume = dts.variables['volume']  # For now, leave in Bohr^3
+            self.free_energy = dts.variables['free_energy'][:,:] #* ha_to_ev  # in eV
+#            self.static_energy = dts.variables['static_energy'][:,:] #* ha_to_ev  # in eV
+#            self.phonon_free_energy = dts.variables['phonon_free_energy'][:,:] #* ha_to_ev  # in eV
+            self.volume = dts.variables['volume'][:,:]  # For now, leave in Bohr^3
+            self.equilibrium_volume = dts.variables['equilibrium_volume'][:]
             self.fit_parameters = dts.variables['fit_parameters'][:, :]
             self.fit_parameters_list = dts.variables['fit_parameters'].getncattr('units')
             self.fit_function = dts.variables['fit_parameters'].getncattr('description')
@@ -65,6 +68,7 @@ class GruneisenFile(EpcFile):
 #            self.acell = dts.variables['acell_from_gruneisen'][:, :] * bohr_to_ang
 #            self.acell_zpm = dts.variables['acell_from_gruneisen_plushalf'][:, :] * bohr_to_ang
             self.acell = dts.variables['acell_from_gruneisen_plushalf'][:, :] * bohr_to_ang
+            self.equilibrium_volume = dts.variables['equilibrium_volume'][:]
 
 #            self.free_energy = dts.variables['free_energy'][:] * ha_to_ev  # in eV
 #            self.volume = dts.variables['volume']  # For now, leave in Bohr^3
