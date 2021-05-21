@@ -26,8 +26,8 @@ class FreeEnergyFile(EpcFile):
 
             self.acell = dts.variables['acell_from_gibbs'][:, :] * bohr_to_ang
             self.free_energy = dts.variables['free_energy'][:, :]  # * ha_to_ev  # in eV
-            self.static_energy = dts.variables['static_energy'][:, :]  # * ha_to_ev  # in eV
-            self.phonon_free_energy = dts.variables['phonon_free_energy'][:, :]  # * ha_to_ev  # in eV
+            #self.static_energy = dts.variables['static_energy'][:, :]  # * ha_to_ev  # in eV
+            #self.phonon_free_energy = dts.variables['phonon_free_energy'][:, :]  # * ha_to_ev  # in eV
             self.volume = dts.variables['volume'][:, :]  # For now, leave in Bohr^3
             self.equilibrium_volume = dts.variables['equilibrium_volume'][:]
             self.equilibrium_volume[0] = self.equilibrium_volume[0] * bohr_to_ang**3
@@ -92,9 +92,9 @@ class GruneisenFile(EpcFile):
             self.equilibrium_volume[0] = self.equilibrium_volume[0] * bohr_to_ang**3
             self.equilibrium_volume[1:] = self.equilibrium_volume[1:] * bohr_to_ang
             self.gruneisen = dts.variables['gruneisen_parameters'][:, :, :]
-            self.gruneisen_from_dynmat = dts.variables['gruneisen_parameters_from_dynmat'][:, :, :]
-            self.gruneisen_from_dynmat_rot = dts.variables['gruneisen_parameters_from_dynmat_rot'][:, :, :]
-            self.omega = dts.variables['omega_equilibrium'][:, :] * ha_to_ev * 1E3  # in meV
+            #self.gruneisen_from_dynmat = dts.variables['gruneisen_parameters_from_dynmat'][:, :, :]
+            #self.gruneisen_from_dynmat_rot = dts.variables['gruneisen_parameters_from_dynmat_rot'][:, :, :]
+            #self.omega = dts.variables['omega_equilibrium'][:, :] * ha_to_ev * 1E3  # in meV
 
     @property
     def ntemp(self):
