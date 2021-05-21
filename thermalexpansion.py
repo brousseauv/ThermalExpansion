@@ -92,11 +92,21 @@ class FreeEnergy(object):
 
         return z    
 
-    def set_weights(self,wtq, normalize=True):
-        # Set the qpt weights
+    def set_weights_from_list(self, wtq, normalize=True):
+        # Set the qpt weights from a list
         if normalize:
             self.wtq = np.array(wtq)/np.sum(wtq)
         
+        else:
+            self.wtq = np.array(wtq)
+
+    def set_weights_from_ncfile(self, wtqfile, normalize=True):
+        # Set the qpt weights from a dry-run ncfile
+        with nc.Dataset(wtqfile, 'r') as dts:
+            wtq = dts.variables['wtk'][:]
+
+        if normalize:
+            self.wtq = np.array(wtq)/np.sum(wtq)
         else:
             self.wtq = np.array(wtq)
 
@@ -207,7 +217,8 @@ class Gibbs_from_anaddb(FreeEnergy):
     out_flists = None
 
     #Parameters
-    wtq = [1.0]
+    wtq_list = None
+    wtq_ncfile = None
     temperature = None
 
     equilibrium_index = None
@@ -221,7 +232,8 @@ class Gibbs_from_anaddb(FreeEnergy):
         thermo_flist = None,
         out_flists = None,
 
-        wtq = [1.0],
+        wtq_list = None,  # I don't think this one is used here...
+        wtq_ncfile = None,
         temperature = np.arange(0,300,50),
 
         bulk_modulus = None,
@@ -812,7 +824,8 @@ class GibbsFreeEnergy(FreeEnergy):
     out_flists = None
 
     #Parameters
-    wtq = [1.0]
+    wtq_list = None
+    wtq_ncfile = None
     temperature = None
 
     check_anaddb = False
@@ -827,7 +840,8 @@ class GibbsFreeEnergy(FreeEnergy):
         ddb_flists = None,
         out_flists = None,
 
-        wtq = [1.0],
+        wtq_list = None,
+        wtq_ncfile = None,
         temperature = np.arange(0,300,50),
         tmin_slope = 700,
 
@@ -921,12 +935,23 @@ class GibbsFreeEnergy(FreeEnergy):
 
         self.volume = np.empty((nvol,4)) # 1st index = data index, 2nd index : total cell volume, (a1,a2,a3)
 
+        # Check that weights have been provided
+        if not wtq_list and not wtq_ncfile:
+            raise Exception('The qpoint weights should be provided, either as wtq_list or wtq_ncfile.')
+
+        if wtq_list and wtq_ncfile:
+            raise Exception('Please provide only one of wtq_list or wtq_ncfile for qpoint weights.')
+
+        if wtq_list:
+            self.set_weights_from_list(wtq_list)
+        elif wtq_ncfile:
+            self.set_weights_from_ncfile(wtq_ncfile)
+
         # Check that all qpt lists have the same lenght, and that it is equal to the number of wtq
         for v in range(nvol):
-            if len(ddb_flists[v][:]) != len(wtq):
+            if len(ddb_flists[v][:]) != len(self.wtq):
                 raise Exception('all ddb lists must have the same number of files, and this number should be equal to the number of qpt weights')
 
-        self.set_weights(wtq)
 
         # Loop on all volumes
         for v in range(nvol):
@@ -1553,7 +1578,8 @@ class Gruneisen(FreeEnergy):
     elastic_fname = None
 
     #Parameters
-    wtq = [1.0]
+    wtq_list = None
+    wtq_ncfile = None
     temperature = None
     pressure = 0.0
     pressure_gpa= 0.0 
@@ -1575,7 +1601,8 @@ class Gruneisen(FreeEnergy):
         out_flists = None,
         elastic_fname = None,
 
-        wtq = [1.0],
+        wtq_list = None,
+        wtq_ncfile = None,
         temperature = np.arange(0,300,50),
         tmin_slope = 700,
 
@@ -1660,12 +1687,23 @@ class Gruneisen(FreeEnergy):
 
         self.volume = np.empty((nvol,4)) # 1st index = data index, 2nd index : total cell volume, (a1,a2,a3)
 
+        # Check that weights have been provided
+        if not wtq_list and not wtq_ncfile:
+            raise Exception('The qpoint weights should be provided, either as wtq_list or wtq_ncfile.')
+
+        if wtq_list and wtq_ncfile:
+            raise Exception('Please provide only one of wtq_list or wtq_ncfile for qpoint weights.')
+
+        if wtq_list:
+            self.set_weights_from_list(wtq_list)
+        elif wtq_ncfile:
+            self.set_weights_from_ncfile(wtq_ncfile)
+
         # Check that all qpt lists have the same lenght, and that it is equal to the number of wtq
         for v in range(nvol):
-            if len(ddb_flists[v][:]) != len(wtq):
-                raise Exception('all ddb lists must have the same number of files, and this number should be equal to the number of qpt weights.\n List index {} has {} entries while there are {} qpt weights.'.format(v,len(ddb_flists[v][:]),len(wtq)))
+            if len(ddb_flists[v][:]) != len(self.wtq):
+                raise Exception('all ddb lists must have the same number of files, and this number should be equal to the number of qpt weights')
 
-        self.set_weights(wtq)
 
         # Loop on all volumes
         for v in range(nvol):
@@ -2105,6 +2143,8 @@ class Gruneisen(FreeEnergy):
             
     def get_acell(self, nqpt, nmode):
 
+        print('\n## Computing acell from phonon frequencies Gruneisens')
+
         # Evaluate acell(T) from Gruneisen parameters
         if self.symmetry == 'cubic':
             
@@ -2155,7 +2195,7 @@ class Gruneisen(FreeEnergy):
             #a_plushalf = new_acell0*(integral_newacell0+1)
             
             test_acell = self.equilibrium_volume[1]*(integral_plushalf + 1)
-            print('testacell={} bohr'.format(test_acell[0]))
+            #print('testacell={} bohr'.format(test_acell[0]))
 
 
             integralvol = 1./(self.bulk_modulus*self.volume[1,0])*np.einsum('q,qvt,qv->t',self.wtq,hwt,self.gruvol)
@@ -2571,6 +2611,7 @@ class Gruneisen(FreeEnergy):
 
     def get_acell_from_dynmat(self, nqpt, nmode):
 
+        print('\n## Computing acell from dynamical matrix Gruneisens')
         # Evaluate acell(T) from Gruneisen parameters, using the dynamical matrix variation
         if self.symmetry == 'cubic':
             
@@ -2607,9 +2648,8 @@ class Gruneisen(FreeEnergy):
             
             #Test with rigid compliance tensor
             new_acell0_rigid = self.equilibrium_volume[1]*(1+1./(9*self.bulk_modulus_rigid*self.equilibrium_volume[0])*np.einsum('q,qv,qv->',self.wtq,self.omega[1,:,:],self.gruneisen_from_dynmat[0, :, :])*0.5)
-            print('################ From Rigid compliance tensor, static_acell0 : {:>7.4f} bohr, new_acell0: {:>7.4f} (bohr)'.format(self.equilibrium_volume[1].round(4),
-                new_acell0_rigid.round(4)))
-            print('delta = {:>7.4f} bohr, delta a/a0 stat = {:>6.4f}%'.format(new_acell0-self.equilibrium_volume[1], (new_acell0-self.equilibrium_volume[1]).round(4)/self.equilibrium_volume[1].round(4)*100))
+            #print('################ From Rigid compliance tensor, static_acell0 : {:>7.4f} bohr, new_acell0: {:>7.4f} (bohr)'.format(self.equilibrium_volume[1].round(4),new_acell0_rigid.round(4)))
+            #print('delta = {:>7.4f} bohr, delta a/a0 stat = {:>6.4f}%'.format(new_acell0-self.equilibrium_volume[1], (new_acell0-self.equilibrium_volume[1]).round(4)/self.equilibrium_volume[1].round(4)*100))
 
             #test_acell = self.equilibrium_volume[1]*(integral_plushalf + 1)
             #print('testacell={} bohr'.format(test_acell[0]))
@@ -4045,7 +4085,8 @@ def compute(
         rootname = 'te2.out',
 
         #Parameters
-        wtq = [1.0],
+        wtq_list = None,
+        wtq_ncfile = None,
         temperature = None,
 
         #Options
@@ -4138,7 +4179,8 @@ def compute(
                     rootname = rootname,
                     symmetry = symmetry,
         
-                    wtq = wtq,
+                    wtq_list = wtq_list,
+                    wtq_ncfile = wtq_ncfile,
                     temperature = temperature,
                     units = units,
                     check_anaddb = check_anaddb,
@@ -4164,7 +4206,8 @@ def compute(
                     rootname = rootname,
                     symmetry = symmetry,
         
-                    wtq = wtq,
+                    wtq_list = wtq_list,
+                    wtq_ncfile = wtq_ncfile,
                     temperature = temperature,
                     units = units,
                     check_anaddb = check_anaddb,
@@ -4194,7 +4237,9 @@ def compute(
                     rootname = rootname,
                     symmetry = symmetry,
         
-                    wtq = wtq,
+                    wtq_list = wtq_list,
+                    wtq_ncfile = wtq_ncfile,
+
                     temperature = temperature,
                     units = units,
 ## FIX ME : IF THERE WAS DATA FOR BULK MODULUS, USE IT!! OR, SIMPLY COMPUTE IT FROM DDB VOLUME DATA...                    
