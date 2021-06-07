@@ -1060,6 +1060,10 @@ class GibbsFreeEnergy(FreeEnergy):
             self.fit_params = np.zeros((4,self.ntemp))
             self.fit_params_list = "V0,E0,B0,B0p"
 
+            p0 = [self.equilibrium_volume[0],self.static_energy[self.equilibrium_index,0],self.bulk_modulus,4.0]
+            popt, pcov = curve_fit(myeos, self.volume[:,0],self.static_energy[:,0],p0)
+            self.static_fit_params = popt
+           
             for t, T in enumerate(self.temperature):
                 p0 = [self.equilibrium_volume[0],self.free_energy[self.equilibrium_index,t],self.bulk_modulus,4.0]
                 popt, pcov = curve_fit(myeos, self.volume[:,0],self.free_energy[:,t],p0)
@@ -1098,6 +1102,11 @@ class GibbsFreeEnergy(FreeEnergy):
                 if self.use_axial_eos:
                     myeos2D = eos.birch_murnaghan_EV_axial2D
 
+                bounds = [[0.95*self.equilibrium_volume[0],1.08*self.static_energy[self.equilibrium_index,0],0.1*self.bulk_modulus,0.],
+                                [1.08*self.equilibrium_volume[0],0.95*self.static_energy[self.equilibrium_index,0],5*self.bulk_modulus,50.]]
+                p0 = [self.equilibrium_volume[0], self.static_energy[self.equilibrium_index,0],self.bulk_modulus,4.0]
+                popt, pcov= curve_fit(myeos, self.volume[:,0], self.static_energy[:,0], p0,bounds=bounds)
+                self.static_volumic_fit_params[:] = popt
 
             for t,T in enumerate(self.temperature):
 
@@ -1460,6 +1469,7 @@ class GibbsFreeEnergy(FreeEnergy):
             data[:,:] = self.free_energy[:,:]
             data.units = 'hartree'
 
+            # FIX ME this makes no sense to have a temperature dependence!!
             data = dts.createVariable('static_energy', 'd', ('number_of_volumes', 'number_of_temperatures'))
             data[:,:] = self.static_energy[:,:]
             data.units = 'hartree'
@@ -1487,10 +1497,21 @@ class GibbsFreeEnergy(FreeEnergy):
             elif self.symmetry == 'cubic':
                 data.description = self.eos_type
 
+            data = dts.createVariable('static_fit_parameters', 'd', ('number_of_fit_parameters'))
+            if self.symmetry == 'cubic':
+                data[:] = self.static_fit_params[:]
+                data.units = self.fit_params_list
+                data.description = self.eos_type
 
             data = dts.createVariable('volumic_fit_parameters', 'd', ('four','number_of_temperatures'))
             if self.symmetry == 'hexagonal':
                 data[:,:] = self.volumic_fit_params[:,:]
+                data.units = "V0,E0,B0,B0p"
+                data.description = self.eos_type
+
+            data = dts.createVariable('static_volumic_fit_parameters', 'd', ('four'))
+            if self.symmetry == 'hexagonal':
+                data[:] = self.static_volumic_fit_params[:]
                 data.units = "V0,E0,B0,B0p"
                 data.description = self.eos_type
 
