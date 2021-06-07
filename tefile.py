@@ -26,8 +26,8 @@ class FreeEnergyFile(EpcFile):
 
             self.acell = dts.variables['acell_from_gibbs'][:, :] * bohr_to_ang
             self.free_energy = dts.variables['free_energy'][:, :]  # * ha_to_ev  # in eV
-            #self.static_energy = dts.variables['static_energy'][:, :]  # * ha_to_ev  # in eV
-            #self.phonon_free_energy = dts.variables['phonon_free_energy'][:, :]  # * ha_to_ev  # in eV
+            self.static_energy = dts.variables['static_energy'][:, :]  # * ha_to_ev  # in eV
+            self.phonon_free_energy = dts.variables['phonon_free_energy'][:, :]  # * ha_to_ev  # in eV
             self.volume = dts.variables['volume'][:, :]  # For now, leave in Bohr^3
             self.equilibrium_volume = dts.variables['equilibrium_volume'][:]
             self.equilibrium_volume[0] = self.equilibrium_volume[0] * bohr_to_ang**3
@@ -35,7 +35,9 @@ class FreeEnergyFile(EpcFile):
             self.fit_parameters = dts.variables['fit_parameters'][:, :]
             self.fit_parameters_list = dts.variables['fit_parameters'].getncattr('units')
             self.fit_function = dts.variables['fit_parameters'].getncattr('description')
+            self.static_fit_parameters = dts.variables['static_fit_parameters'][:]
             self.eos_fit = dts.variables['volumic_fit_parameters'][:, :]  # For now, in Ha and Ha/bohr^3
+            self.static_eos_fit = dts.variables['static_volumic_fit_parameters'][:]  # For now, in Ha and Ha/bohr^3
             self.bulk_modulus_from_eos = self.eos_fit[2, :] * habo3_to_gpa
             self.specific_heat = dts.variables['specific_heat'][:] * ha_to_ev  # Should be in eV/K
 

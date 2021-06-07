@@ -6,6 +6,7 @@ __author__ = "brousseauv"
 
 from .plotter import Plotter
 from .tefile import set_file_class
+import eos as eos
 from expfile import EXPfile
 from constants import bohr_to_ang
 from matplotlib import rc
@@ -46,6 +47,9 @@ class TEplot(Plotter):
 
     def float_formatter(self, x, pos):
         return '%5.2f' % x
+
+    def float4_formatter(self, x, pos):
+        return '%5.4f' % x
 
     def exp_formatter(self, x, pos):
         return '%5.2e' % x
@@ -213,6 +217,131 @@ class RoomAlphaPlot(AlphaPlot):
             return r'$\alpha$ ($10^{-6}K^{-1}$), ref. 293K'
 
 
+class FreeEnergy1DPlot(TEplot):
+    """
+    Plots temperature dependent free energy curve
+    """
+
+    def __init__(self, ax=None, field='free_energy_1d', **kwargs):
+        self.field = field
+        super(FreeEnergy1DPlot, self).__init__(ax=ax)
+
+    def plot_te(self, te_data, temp=None, withstatic=True, cmap='jet',  **kwargs):
+
+        if len(te_data) > 1:
+            raise Exception("""FreeEnergy1D plots handles only one file at a time,
+                             and you provided {}.""".format(len(te_data)))
+
+        ncfile = te_data[0]
+
+        if temp is not None:
+            tmin = self.find_temp_index(temp[0], ncfile.temperature)
+            tmax = self.find_temp_index(temp[-1], ncfile.temperature)
+
+            tarr = ncfile.temperature[tmin:tmax+1]
+        else:
+            tmin = ncfile.temperature[0]
+            tmax = ncfile.temperature[-1]
+            tarr = ncfile.temperature
+
+        fmin = np.zeros((len(tarr)+1))
+        amin = np.zeros((len(tarr)+1))
+
+        # Plot static data
+        equilibrium_index = np.where(ncfile.volume[:, 1] == ncfile.equilibrium_volume[1]/bohr_to_ang)
+        if withstatic:
+            self.ax.plot(ncfile.volume[:, 1], ncfile.static_energy[:, 0], marker='x', color='k', linestyle='None')
+            self.ax.plot(ncfile.equilibrium_volume[1]/bohr_to_ang, ncfile.static_energy[equilibrium_index, 0],
+                         marker='o', color='k')
+
+        amin[0] = ncfile.equilibrium_volume[1]/bohr_to_ang
+        amin[1:] = ncfile.acell[0, tmin:tmax+1]/bohr_to_ang
+
+        x = np.linspace(0.998*np.amin(ncfile.volume[:, 1]), 1.002*np.amax(ncfile.volume[:, 1]), 100)
+
+        if ncfile.fit_function == 'Murnaghan':
+            fit = eos.murnaghan_EV(x**3/4, ncfile.static_fit_parameters[0],
+                                   ncfile.static_fit_parameters[1], ncfile.static_fit_parameters[2],
+                                   ncfile.static_fit_parameters[3])
+            fmin[0] = eos.murnaghan_EV(amin[0]**3/4, ncfile.static_fit_parameters[0],
+                                       ncfile.static_fit_parameters[1], ncfile.static_fit_parameters[2],
+                                       ncfile.static_fit_parameters[3])
+
+        elif ncfile.fit_function == 'Murnaghan-Birch':
+            fit = eos.birch_murnaghan_EV(x**3/4, ncfile.static_fit_parameters[0],
+                                         ncfile.static_fit_parameters[1], ncfile.static_fit_parameters[2],
+                                         ncfile.static_fit_parameters[3])
+            fmin[0] = eos.birch_murnaghan_EV(amin[0]**3/4, ncfile.static_fit_parameters[0],
+                                             ncfile.static_fit_parameters[1], ncfile.static_fit_parameters[2],
+                                             ncfile.static_fit_parameters[3])
+
+        if withstatic:
+            self.ax.plot(x, fit, 'k')
+
+        # Plot Temperature dependent free energy
+        mycmap = plt.get_cmap(cmap)
+        colors = mycmap(np.linspace(0, 1, len(tarr)))
+
+        for t in range(len(tarr)):
+            self.ax.plot(ncfile.volume[:, 1], ncfile.free_energy[:, t], marker='x', color=colors[t], linestyle='None')
+
+            if ncfile.fit_function == 'Murnaghan':
+                fit = eos.murnaghan_EV(x**3/4, ncfile.fit_parameters[0, tmin+t],
+                                       ncfile.fit_parameters[1, tmin+t], ncfile.fit_parameters[2, tmin+t],
+                                       ncfile.fit_parameters[3, tmin+t])
+                fmin[t+1] = eos.murnaghan_EV(amin[t+1]**3/4, ncfile.fit_parameters[0, tmin+t],
+                                             ncfile.fit_parameters[1, tmin+t], ncfile.fit_parameters[2, tmin+t],
+                                             ncfile.fit_parameters[3, tmin+t])
+
+            elif ncfile.fit_function == 'Murnaghan-Birch':
+                fit = eos.birch_murnaghan_EV(x**3/4, ncfile.fit_parameters[0, tmin+t],
+                                             ncfile.fit_parameters[1, tmin+t], ncfile.fit_parameters[2, tmin+t],
+                                             ncfile.fit_parameters[3, tmin+t])
+                fmin[t+1, tmin+t] = eos.birch_murnaghan_EV(amin[t+1, tmin+t]**3/4, ncfile.fit_parameters[0, tmin+t],
+                                                           ncfile.fit_parameters[1, tmin+t],
+                                                           ncfile.fit_parameters[2, tmin+t],
+                                                           ncfile.fit_parameters[3, tmin+t])
+
+            self.ax.plot(x, fit, color=colors[t])
+            self.ax.plot(amin[t+1], fmin[t+1], marker='o', color=colors[t])
+
+        self.plot_legend(self.ax, tarr, colors)
+
+    def find_temp_index(self, t, arr):
+        # Find index of required temperature in the array
+        lst = list(arr)
+        if t in lst:
+            return lst.index(t)
+        else:
+            raise Exception('Temperature {}K was not found.'.format(t))
+
+    def plot_legend(self, ax, temp, col):
+
+        handles = []
+
+        handles.append(Line2D([0], [0], color='k', linewidth=3.0, label='Static'))
+
+        for t in range(len(temp)):
+            handles.append(Line2D([0], [0], color=col[t], linewidth=3.0, label='{:4.0f}K'.format(temp[t])))
+
+        ax.legend(handles=handles, loc=8, bbox_to_anchor=(0.5, -0.30), ncol=6, fontsize=16)
+
+    @property
+    def xlabel(self):
+        return r'a (Bohr)'
+
+    @property
+    def ylabel(self):
+        return r'Free energy (Ha)'
+
+    def format_ticks(self):
+
+        self.ax.xaxis.set_major_formatter(FuncFormatter(self.float_formatter))
+        self.ax.yaxis.set_major_formatter(FuncFormatter(self.float4_formatter))
+        plt.setp(self.ax.get_xticklabels(), fontsize=16, weight='bold')
+        plt.setp(self.ax.get_yticklabels(), fontsize=16, weight='bold')
+
+
 class FreeEnergy2DPlot(TEplot):
     """
     Plots temperature dependent free energy surface
@@ -229,7 +358,6 @@ class FreeEnergy2DPlot(TEplot):
                              and you provided {}.""".format(len(te_data)))
 
         ncfile = te_data[0]
-#        nvol = np.shape(ncfile.volume)[0]
         index = self.find_temp_index(temp, ncfile.temperature)
         if self.field == 'free_energy_2d':
             print('Plotting 2D free energy for T={}K'.format(temp))
@@ -253,10 +381,6 @@ class FreeEnergy2DPlot(TEplot):
             raise Exception('Equilibrium volume was found twice, check your data!')
         else:
             equilibrium_index = equilibrium_index[0]
-#        print(equilibrium_index)
-#        print('original data')
-#        for v in range(nvol):
-#            print('{} {} {}'.format(ncfile.volume[v,1], ncfile.volume[v,3], fe[v]))
         grid, fe2d = self.reshape_fe(ncfile.volume[:, 1], ncfile.volume[:, 3], fe)
 
         # This is for raw data only
@@ -273,7 +397,6 @@ class FreeEnergy2DPlot(TEplot):
             gridx, gridy = np.meshgrid(arrx, arry)
             vlist = [ncfile.volume[:, 1], ncfile.volume[:, 3]]
             interp = griddata(list(zip(*vlist)), fe, (gridx, gridy), method='cubic')
-    #        self.ax.pcolormesh(gridx, gridy, interp.transpose())
             self.ax.contourf(gridx, gridy, interp, 50, cmap=cmap)
             # mask where I have nans
             interp = np.ma.masked_invalid(interp)
@@ -284,10 +407,6 @@ class FreeEnergy2DPlot(TEplot):
                 if self.field == 'free_energy_2d':
                     print('delta a = {:>7.4f}, delta c = {:>7.4f}'.format(best_fit[0]-ncfile.equilibrium_volume[1],
                           best_fit[1]-ncfile.equilibrium_volume[3]))
-        #        print('a step = {}, c step ={}'.format(arrx[best_fit_index[0]+1] - arrx[best_fit_index[0]],
-        #              arry[best_fit_index[1]+1]-arry[best_fit_index[1]]))
-        #        print('in order:', interp[best_fit_index[0], best_fit_index[1]])
-        #        print('reverser:', interp[best_fit_index[1], best_fit_index[0]])
 
                 self.ax.plot(best_fit[0], best_fit[1], marker='x', color='white', markersize=4)
 
@@ -309,43 +428,7 @@ class FreeEnergy2DPlot(TEplot):
 
         self.ax.set_title(title, fontsize=16)
 
-#        plt.colorbar(pc, ax=self.ax)
-
-#        # Test lmfit on the interpolated data
-#        lmfit_model_para = lmfit.Model(eos.paraboloid_2D)
-#        params_para = lmfit_model_para.make_params()
-#        params_para['a0'].set(value=ncfile.equilibrium_volume[1], vary=True,min=0.95*ncfile.equilibrium_volume[1],
-#                              max=1.08*ncfile.equilibrium_volume[1])
-#        params_para['c0'].set(value=ncfile.equilibrium_volume[3], vary=True,min=0.95*ncfile.equilibrium_volume[3],
-#                              max=1.08*ncfile.equilibrium_volume[3])
-#        params_para['A'].set(value=1.,vary=True,min=0.)
-#        params_para['C'].set(value=1.,vary=True,min=0.)
-#        params_para['B'].set(value=fe[equilibrium_index],vary=True,min=1.10*fe[equilibrium_index],max=0.95*fe[equilibrium_index])
-#
-#        print('convert')
-#        data2 = np.array(interp[corner:100-corner, corner:100-corner], dtype=np.float)
-#        print('done')
-#        print(type(data2), type(arrx[0]), type(arry[0]))
-#        mesh2 = np.array([arrx[corner:100-corner], arry[corner:100-corner]])
-#        data2.astype(np.float64)
-#        mesh2.astype(np.float64)
-#        mesh3 = np.concatenate((arrx[corner:100-corner], arry[corner:100-corner]))
-#        data3 = np.ones((48,48), dtype=np.float64)
-#        np.shape(data3)
-#        data3.astype(np.float64)
-#        lmfit_result_para=lmfit_model_para.fit(data3, mesh=mesh3, a0=params_para['a0'],A=params_para['A'],
-#                                               c0=params_para['c0'],C=params_para['C'],B=params_para['B'])
-#        lmfit_result_para=lmfit_model_para.fit(interp2, mesh=np.concatenate((arrx2, arry2)), a0=params_para['a0'],
-#                                               A=params_para['A'],c0=params_para['c0'],C=params_para['C'],B=params_para['B'])
-#        lmfit_result_para=lmfit_model_para.fit(ydata, mesh=xdata, a0=params_para['a0'],A=params_para['A'],
-#                                               c0=params_para['c0'], C=params_para['C'],B=params_para['B'])
-#
-#        print(lmfit_result_para.params.pretty_print())
-#
-#        # Test contourplot of paraboloid best fit from paraboloid_2d
-#        bestpara = eos.paraboloid_2D([gridx.ravel(), gridy.ravel()], a0=6.1016, A=2.793, c0=9.943, C=7.181, B=-173.8)
-#        para = np.reshape(bestpara, (len(arrx), len(arry)))
-#        self.ax.contour(meshx2, meshy2, bestpara, levels=50, color='r')
+        plt.colorbar(pc, ax=self.ax)
 
     def find_temp_index(self, t, arr):
         # Find index of required temperature in the array
@@ -429,6 +512,9 @@ def generate_plot(
 
     if field.find('energy_2d') != -1:
         myax = FreeEnergy2DPlot(ax=ax, field=field, **kwargs)
+
+    if field.find('energy_1d') != -1:
+        myax = FreeEnergy1DPlot(ax=ax, field=field, **kwargs)
 
     myax.plot_te(te_data, marker_list=marker_list, color_list=color_list, linewidth=1.5, **kwargs)
     if exp_data:
