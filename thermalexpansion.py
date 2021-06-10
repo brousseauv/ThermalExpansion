@@ -1102,11 +1102,11 @@ class GibbsFreeEnergy(FreeEnergy):
                 if self.use_axial_eos:
                     myeos2D = eos.birch_murnaghan_EV_axial2D
 
-                bounds = [[0.95*self.equilibrium_volume[0],1.08*self.static_energy[self.equilibrium_index,0],0.1*self.bulk_modulus,0.],
-                                [1.08*self.equilibrium_volume[0],0.95*self.static_energy[self.equilibrium_index,0],5*self.bulk_modulus,50.]]
-                p0 = [self.equilibrium_volume[0], self.static_energy[self.equilibrium_index,0],self.bulk_modulus,4.0]
-                popt, pcov= curve_fit(myeos, self.volume[:,0], self.static_energy[:,0], p0,bounds=bounds)
-                self.static_volumic_fit_params[:] = popt
+            bounds = [[0.95*self.equilibrium_volume[0],1.08*self.static_energy[self.equilibrium_index,0],0.1*self.bulk_modulus,0.],
+                            [1.08*self.equilibrium_volume[0],0.95*self.static_energy[self.equilibrium_index,0],5*self.bulk_modulus,50.]]
+            p0 = [self.equilibrium_volume[0], self.static_energy[self.equilibrium_index,0],self.bulk_modulus,4.0]
+            popt, pcov= curve_fit(myeos, self.volume[:,0], self.static_energy[:,0], p0,bounds=bounds)
+            self.static_volumic_fit_params = popt
 
             for t,T in enumerate(self.temperature):
 
