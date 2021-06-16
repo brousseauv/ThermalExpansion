@@ -21,6 +21,7 @@ from gsrfile import GsrFile
 from gapfile import GapFile
 from elasticfile import ElasticFile
 from expfile import EXPfile
+from eigfile import EIGfile
 import eos as eos
 import lmfit as lmfit
 
@@ -894,6 +895,7 @@ class GibbsFreeEnergy(FreeEnergy):
         self.ntemp = len(self.temperature) 
         self.tmin_slope = tmin_slope
 
+
         if not bulk_modulus:
             raise Exception('Must provide an estimate of the bulk modulus and specify its units, in GPa or Ha/bohr^3')
         if bulk_modulus is not None:
@@ -1043,7 +1045,6 @@ class GibbsFreeEnergy(FreeEnergy):
         self.compute_specific_heat(nqpt, nmode)
         self.delta_acell_from_high_t_slope = self.get_hight_slope()
 
-        
     def minimize_free_energy(self):
 
         if self.symmetry == 'cubic':
@@ -3879,9 +3880,13 @@ class Static(object):
             units = 'eV',
 
             dedp = False,
+            estimate_gap_correction = False,
         
             etotal_flist = None,
-            gap_fname = None,             
+            gap_fname = None, 
+            te_fname = None,
+            eig_flist = None,
+            valence = None,
             initial_params = None,
 
             static_plot = False,
@@ -3892,32 +3897,43 @@ class Static(object):
         self.units = units
         self.etotal_flist = etotal_flist
         self.gap_fname = gap_fname
+        self.te_fname = te_fname
+        self.eig_flist = eig_flist
+        self.valence = valence
         self.dedp = dedp
         self.initial_params = initial_params
         self.static_plot = static_plot
+        self.estimate_gap_correction = estimate_gap_correction
+        self.valence = valence
 
         # Data check
         if not self.etotal_flist:
             raise Exception('Must provide a list of _GSR.nc files containing total energy')
         if self.dedp:
-            if not self.gap_fname:
-                raise Exception('Must provide a netCDF file containing gap energies. Please use netcdf_gap.py') 
+            if not self.gap_fname and not self.eig_flist:
+                raise Exception("Must provide a netCDF file containing gap energies (use netcdf_gap.py) 
+                                 or a list of EIG.nc files for the different volumes") 
+            if len(eig_flist) != len(etotal_flist):
+                raise Exception('etotal_flist and eig_flist must have the same number of volumes,but etotal_flist has {} and eig_flist has {}'.format(np.shape(etotal_flist)[0],len(eig_flist)))
+            if not self.valence:
+                raise Exception('Must provide valence band index to obtain an estimate of the ZPAE gap correction (start at 1)')
 
-        
+        if self.estimate_gap_correction:
+            if not self.te_fname:
+                raise Exception('Must provide a TE.nc file containing the high T slope of (delta a0)/a0 as te_fname.')
+                   
         self.nfile = len(self.etotal_flist)
 
         self.etotal = np.empty((self.nfile))
-        self.gap_energy = np.empty((self.nfile))
         self.volume = np.empty((self.nfile))
 
         if self.dedp:
-            gap = GapFile(self.gap_fname)
-            self.gap_energy = gap.gap_energy
+
+            self.get_gap_energy()
             if len(self.gap_energy) != self.nfile:
                 raise Exception('{} contains {} gap values, while there are {} files in etotal_flist. '.format(self.gap_fname, len(self.gap_energy),self.nfile))
 
         for n, fname in enumerate(self.etotal_flist):
-
             gs = GsrFile(fname)
             self.etotal[n] = gs.etotal
             self.volume[n] = gs.volume
@@ -3927,8 +3943,10 @@ class Static(object):
         self.effective_pressure = self.get_effective_pressure()
 
         if self.dedp:
-    
-            self.pressure, self.dedp_fit, self.dedp = self.get_dedp()
+            self.dedp_fit, self.dedp = self.get_dedp()
+
+        if self.estimate_gap_correction:
+            self.estimate_gap_zpae()
 
 
     def get_bulk_modulus(self):
@@ -3975,12 +3993,9 @@ class Static(object):
 
     def get_dedp(self):
 
-        pdata = eos.murnaghan_PV(self.volume,self.equilibrium_volume, self.bulk_modulus, self.bulk_modulus_derivative)
-        #print(pdata*cst.habo3_to_gpa)
-        #print(self.gap_energy*cst.ha_to_ev )
-
 
         # find which pressure is closer to zero. Make the linear fit with neighboring data
+        pdata = self.effective_pressure_from_eos
         p0 = np.abs(pdata).argmin()
 
         fit = np.polyfit(pdata[p0-1:p0+2], self.gap_energy[p0-1:p0+2],1)
@@ -4007,7 +4022,31 @@ class Static(object):
             create_directory(figname)
             plt.savefig(figname)
             plt.show()
-        return pdata, fit, dedp  
+        return fit, dedp  
+
+    def estimate_gap_zpae(self):
+
+        if not self.gap_energy:
+            self.gap_energy = self.get_gap_energy()
+
+
+    def get_gap_energy(self):
+
+        if self.eig_flist:
+            self.gap_energy = np.ma.zeros(len(self.eig_flist))
+
+            for i, fname in enumerate(self.eig_flist):
+                if fname is not 'None':
+                    eig = EIGfile(fname=fname)
+                    eig.read_nc()
+                    self.gap_energy[i] = eig.get_gap_energy(self.valence)
+                else:
+                    self.gap_energy[i] = np.ma.masked
+
+        elif self.gap_fname:
+            gap = GapFile(self.gap_fname)
+            self.gap_energy = gap.gap_energy
+    
         
     def write_output(self):
 
@@ -4081,6 +4120,7 @@ class Static(object):
                 data[:] = self.dedp_fit
                 data.units = 'hartree/GPa, hartree'            
 
+
 ############################################################
 # Also, split this into different files?
 
@@ -4103,6 +4143,8 @@ def compute(
         elastic_fname = None,
         etotal_flist = None,
         gap_fname = None,
+        eig_flist = None,
+        valence = None,
         rootname = 'te2.out',
 
         #Parameters
@@ -4129,6 +4171,7 @@ def compute(
         gruneisen_path = False,
         bulkmodulus = False,
         dedp = False,
+        estimate_gap_correction = False,
         initial_params = None,
         static_plot = False,
         manual_correction = False,
@@ -4139,7 +4182,7 @@ def compute(
 
     # Choose appropriate type of free energy 
     # FIX ME this should just be called Static, or something like that...
-    if bulkmodulus:
+    if bulkmodulus or static:
         
         static_calc = Static(
                     rootname = rootname,
@@ -4147,10 +4190,14 @@ def compute(
                     
                     etotal_flist = etotal_flist,
                     gap_fname = gap_fname,
+                    eig_flist = eig_flist,
             
                     dedp = dedp,
                     initial_params = initial_params,
 
+
+                    estimate_gap_correction = estimate_gap_correction,
+                    valence = valence,
                     static_plot = static_plot,
                     eos_type = eos_type,
 
@@ -4238,7 +4285,7 @@ def compute(
         
                     bulk_modulus = bulk_modulus,
                     bulk_modulus_units = bulk_modulus_units,
-
+                    
                     manual_correction = manual_correction,
                     verbose = verbose,
 

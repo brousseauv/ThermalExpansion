@@ -304,6 +304,8 @@ class FreeEnergy1DPlot(TEplot):
 
             self.ax.plot(x, fit, color=colors[t])
             self.ax.plot(amin[t+1], fmin[t+1], marker='o', color=colors[t])
+        self.ax.plot(amin[1:], fmin[1:], marker='None', color='darkslategray', linestyle='dashed')
+
 
         self.plot_legend(self.ax, tarr, colors)
 
@@ -375,7 +377,7 @@ class FreeEnergy2DPlot(TEplot):
             title = 'Phonon free energy at {}K'.format(temp)
             write_out = False
 
-        a0, c0 = ncfile.equilibrium_volume[1], ncfile.equilibrium_volume[3]
+        a0, c0 = ncfile.equilibrium_volume[1]/bohr_to_ang, ncfile.equilibrium_volume[3]/bohr_to_ang
         equilibrium_index = np.where(ncfile.volume[:, 0] == ncfile.equilibrium_volume[0])
         if len(equilibrium_index) > 1:
             raise Exception('Equilibrium volume was found twice, check your data!')
@@ -405,8 +407,7 @@ class FreeEnergy2DPlot(TEplot):
             if write_out:
                 print('Minimal FE : a0 = {:>7.4f}, c0 = {:>7.4f}', best_fit[0], best_fit[1])
                 if self.field == 'free_energy_2d':
-                    print('delta a = {:>7.4f}, delta c = {:>7.4f}'.format(best_fit[0]-ncfile.equilibrium_volume[1],
-                          best_fit[1]-ncfile.equilibrium_volume[3]))
+                    print('delta a = {:>7.4f}, delta c = {:>7.4f}'.format(best_fit[0]-a0, best_fit[1]-c0))
 
                 self.ax.plot(best_fit[0], best_fit[1], marker='x', color='white', markersize=4)
 
@@ -428,7 +429,7 @@ class FreeEnergy2DPlot(TEplot):
 
         self.ax.set_title(title, fontsize=16)
 
-        plt.colorbar(pc, ax=self.ax)
+#        plt.colorbar(pc, ax=self.ax)
 
     def find_temp_index(self, t, arr):
         # Find index of required temperature in the array

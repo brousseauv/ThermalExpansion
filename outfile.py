@@ -36,6 +36,7 @@ class OutFile(EpcFile):
             self.symrel = np.reshape(self.symrel, (self.nsym,3,3)) # TEST THIS!!!!! Compare output results with the code I wrote in zpr_analyser. And maybe use this there.
     
             self.volume = self.cell_volume()
+            self.weights = root.variables['wtk'][:]
 
     def cell_volume(self):
 
