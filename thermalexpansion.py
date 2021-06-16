@@ -3945,7 +3945,7 @@ class Static(object):
             self.volume[n] = gs.volume
 
 
-        self.bulk_modulus, self.bulk_modulus_derivative, self.equilibrium_volume, self.equilibrium_energy =  self.get_bulk_modulus()
+        self.bulk_modulus_from_eos, self.bulk_modulus_derivative, self.equilibrium_volume, self.equilibrium_energy =  self.get_bulk_modulus()
         self.effective_pressure = self.get_effective_pressure()
 
         if self.dedp:
@@ -3992,7 +3992,7 @@ class Static(object):
     def get_effective_pressure(self):
 
         #Extract effective pressure at a given volume from Murnaghan EOS
-        pdata = eos.murnaghan_PV(self.volume,self.equilibrium_volume, self.bulk_modulus, self.bulk_modulus_derivative)
+        pdata = eos.murnaghan_PV(self.volume,self.equilibrium_volume, self.bulk_modulus_from_eos, self.bulk_modulus_derivative)
 
         return pdata
 
@@ -4001,13 +4001,28 @@ class Static(object):
 
 
         # find which pressure is closer to zero. Make the linear fit with neighboring data
+        # This will have to be given in terms of number of lattice parameters...
+        # Use the full volumes for EOS fitting, then loop for the gaps, or think of something
         pdata = self.effective_pressure_from_eos
         p0 = np.abs(pdata).argmin()
 
+        # This is the original version, just a linear fit...
         fit = np.polyfit(pdata[p0-1:p0+2], self.gap_energy[p0-1:p0+2],1)
 
         dedp = fit[0]
+        print('From linear fit')
         print('dedp  = {} meV/GPa'.format(dedp*cst.ha_to_ev*1000/cst.habo3_to_gpa))
+
+        # This is from finite difference...
+        print('From FD 0.5%')
+        print('psteps = {}, {}'.format(pdata[p0-1]-pdata[p0], pdata[p0]-pdata[p0+1]))
+        self.dedp_fd = (self.gap_energy[p0+1] - self.gap_energy[p0-1])/(pdata[p0+1]-pdata[p0-1])
+        print('dedp  = {} meV/GPa'.format(dedp_fd*cst.ha_to_ev*1000/cst.habo3_to_gpa))
+
+        print('From FD 1.0%')
+        print('psteps = {}, {}'.format(pdata[p0-2]-pdata[p0], pdata[p0]-pdata[p0+2]))
+        self.dedp_fd2 = (self.gap_energy[p0+2] - self.gap_energy[p0-2])/(pdata[p0+2]-pdata[p0-2])
+        print('dedp  = {} meV/GPa'.format(dedp_fd*cst.ha_to_ev*1000/cst.habo3_to_gpa))
 
         if self.static_plot:
 
@@ -4034,6 +4049,23 @@ class Static(object):
 
         if not self.gap_energy:
             self.gap_energy = self.get_gap_energy()
+
+        from .tefile import set_file_class
+
+        tefile = set_file_class(te_fname)
+        # the slope variable will be of dimension (nacell, 1)
+        slope = tefile.delta_acell_from_high_t_slope
+
+        # see what to do if I have the bulk modulus from elastic constants... do both?
+        # or give it as an input?
+        bm_from_elastic = tefile.bulk_modulus_from_elastic
+        if bm_elastic is not None:
+            # compute formula with this B0
+            self.zp_gap_elast = -self.bulk_modulus_from_elastic * self.dedp * slope
+
+
+        # Compute also with the one from eos
+        self.zp_gap_eos = -self.bulk_modulus_from_eos * self.dedp * slope
 
 
     def get_gap_energy(self):
@@ -4065,7 +4097,7 @@ class Static(object):
             f.write('Static lattice properties, from Murnaghan equation of state\n\n')
             f.write('{:<35s} : {:>12.4f} bohr^3\n'.format('Equilibrium volume',self.equilibrium_volume))
             f.write('{:<35s} : {:>12.4f} eV\n'.format('Equilibrium energy',self.equilibrium_energy*cst.ha_to_ev))
-            f.write('{:<35s} : {:>12.4f} GPa\n'.format('Bulk modulus',self.bulk_modulus*cst.habo3_to_gpa))
+            f.write('{:<35s} : {:>12.4f} GPa\n'.format('Bulk modulus',self.bulk_modulus_from_eos*cst.habo3_to_gpa))
             f.write('{:<35s} : {:>12.4f}\n'.format('Bulk modulus pressure derivative',self.bulk_modulus_derivative))
             f.write('{:<35s} : {:>12.4f} meV/GPa\n'.format('dEgap/dP (P=0)', self.dedp*cst.ha_to_ev*1000/cst.habo3_to_gpa))
 
@@ -4091,8 +4123,8 @@ class Static(object):
             data[:] = self.equilibrium_energy
             data.units = 'hartree'
            
-            data = dts.createVariable('bulk_modulus','d',('one'))
-            data[:] = self.bulk_modulus*cst.habo3_to_gpa
+            data = dts.createVariable('bulk_modulus_from_eos','d',('one'))
+            data[:] = self.bulk_modulus_from_eos*cst.habo3_to_gpa
             data.units = 'GPa'
 
             data = dts.createVariable('bulk_modulus_derivative','d',('one'))
