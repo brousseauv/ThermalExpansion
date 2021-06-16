@@ -2668,6 +2668,12 @@ class Gruneisen(FreeEnergy):
 
             a_plushalf = new_acell0*(integral+1)
             
+            # This is just a test to see if the grun_rot make any difference...
+            # Renormalize the a(T=0) with the zero-point energy contribution
+            new_acell0_rot = self.equilibrium_volume[1]*(1+1./(9*self.bulk_modulus*self.equilibrium_volume[0])*np.einsum('q,qv,qv->',self.wtq,self.omega[1,:,:],self.gru_rot[0, :, :])*0.5)
+            print('################ static_acell0 : {:>7.4f} bohr, new_acell0: {:>7.4f} (bohr)'.format(self.equilibrium_volume[1].round(4), new_acell0_rot.round(4)))
+            print('delta = {:>7.4f} bohr, delta a/a0 stat = {:>6.4f}%'.format(new_acell0_rot-self.equilibrium_volume[1], (new_acell0_rot-self.equilibrium_volume[1]).round(4)/self.equilibrium_volume[1].round(4)*100))
+
             #Test with rigid compliance tensor
             new_acell0_rigid = self.equilibrium_volume[1]*(1+1./(9*self.bulk_modulus_rigid*self.equilibrium_volume[0])*np.einsum('q,qv,qv->',self.wtq,self.omega[1,:,:],self.gruneisen_from_dynmat[0, :, :])*0.5)
             #print('################ From Rigid compliance tensor, static_acell0 : {:>7.4f} bohr, new_acell0: {:>7.4f} (bohr)'.format(self.equilibrium_volume[1].round(4),new_acell0_rigid.round(4)))
@@ -2972,7 +2978,7 @@ class Gruneisen(FreeEnergy):
     def get_gruneisen_from_dynmat(self,nqpt,nmode,nvol):
 
         # This computes the gruneisen parameters from the change in the dynamical matrix
-        # like phonopy (and anaddb?)
+        # like phonopy
             
         # for now, I reopen all files, but later on change the loop ordering (anyway, it should not do everything linearly, but rather use functions depending of input parameters
 
