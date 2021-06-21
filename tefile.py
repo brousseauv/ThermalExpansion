@@ -2,7 +2,7 @@ from __future__ import print_function
 __author__ = 'brousseauv'
 
 import netCDF4 as nc
-from epcfile import EpcFile
+from ElectronPhononCoupling import EpcFile
 from constants import ha_to_ev, bohr_to_ang, habo3_to_gpa
 
 """
@@ -40,7 +40,7 @@ class FreeEnergyFile(EpcFile):
             self.static_eos_fit = dts.variables['static_volumic_fit_parameters'][:]  # For now, in Ha and Ha/bohr^3
             self.bulk_modulus_from_eos = self.eos_fit[2, :] * habo3_to_gpa
             self.specific_heat = dts.variables['specific_heat'][:] * ha_to_ev  # Should be in eV/K
-            self.delta_acell_from_high_t_slope = dts.variables['delta_acell_from_high_t_slope'][:,:]
+            self.delta_acell_from_high_t_slope = dts.variables['delta_acell_on_acell0_from_high_t_slope'][:]
             self.bulk_modulus_from_elastic = None
 
             # For cubics, eos fit is FE fit
@@ -99,6 +99,8 @@ class GruneisenFile(EpcFile):
             #self.gruneisen_from_dynmat = dts.variables['gruneisen_parameters_from_dynmat'][:, :, :]
             #self.gruneisen_from_dynmat_rot = dts.variables['gruneisen_parameters_from_dynmat_rot'][:, :, :]
             #self.omega = dts.variables['omega_equilibrium'][:, :] * ha_to_ev * 1E3  # in meV
+            self.delta_acell_from_high_t_slope = dts.variables['delta_acell_on_acell0_from_high_t_slope'][:]
+
 
     @property
     def ntemp(self):

@@ -211,6 +211,7 @@ class FreeEnergy(object):
 
         return B0
 
+
 class Gibbs_from_anaddb(FreeEnergy):
 
     #Input files
@@ -326,7 +327,7 @@ class Gibbs_from_anaddb(FreeEnergy):
 
             F_thermal = np.loadtxt(fname,usecols=(1))
 
-            # Read data from _OUT file
+
             gs = OutFile(out_flists[v])
             self.volume[v,0] = gs.volume
             self.volume[v,1:] = gs.acell
@@ -3888,12 +3889,16 @@ class Static(object):
             dedp = False,
             estimate_gap_correction = False,
         
-            etotal_flist = None,
+            gsr_flist = None,
+            out_flists = None,
             gap_fname = None, 
             te_fname = None,
             eig_flist = None,
             valence = None,
             initial_params = None,
+            symmetry = None,
+            pressure = 0.0,
+            pressure_units = None,
 
             static_plot = False,
 
@@ -3901,7 +3906,8 @@ class Static(object):
 
         self.rootname = rootname
         self.units = units
-        self.etotal_flist = etotal_flist
+        self.gsr_flist = gsr_flist
+        self.out_flists = out_flists
         self.gap_fname = gap_fname
         self.te_fname = te_fname
         self.eig_flist = eig_flist
@@ -3911,16 +3917,28 @@ class Static(object):
         self.static_plot = static_plot
         self.estimate_gap_correction = estimate_gap_correction
         self.valence = valence
+        self.pressure = pressure
+
+        print('Running static calculation')
+
+        self.symmetry = symmetry
+        if not self.symmetry:
+            raise Exception('Symmetry type must be specified')
 
         # Data check
-        if not self.etotal_flist:
-            raise Exception('Must provide a list of _GSR.nc files containing total energy')
+        if not self.gsr_flist and not self.out_flists:
+            raise Exception('Must provide a list of _GSR.nc or _OUT.nc files containing total energy')
         if self.dedp:
             if not self.gap_fname and not self.eig_flist:
-                raise Exception("Must provide a netCDF file containing gap energies (use netcdf_gap.py) 
-                                 or a list of EIG.nc files for the different volumes") 
-            if len(eig_flist) != len(etotal_flist):
-                raise Exception('etotal_flist and eig_flist must have the same number of volumes,but etotal_flist has {} and eig_flist has {}'.format(np.shape(etotal_flist)[0],len(eig_flist)))
+                raise Exception("""Must provide a netCDF file containing gap energies (use netcdf_gap.py) 
+                                 or a list of EIG.nc files for the different volumes""") 
+            if gsr_flist:
+                if len(eig_flist) != len(gsr_flist):
+                    raise Exception('gsr_flist and eig_flist must have the same number of volumes,but gsr_flist has {} and eig_flist has {}'.format(np.shape(gsr_flist)[0],len(eig_flist)))
+            if out_flists:
+                if len(eig_flist) != len(out_flists):
+                    raise Exception('out_flists and eig_flist must have the same number of volumes,but out_flists has {} and eig_flist has {}'.format(np.shape(out_flists)[0],len(eig_flist)))
+
             if not self.valence:
                 raise Exception('Must provide valence band index to obtain an estimate of the ZPAE gap correction (start at 1)')
 
@@ -3928,31 +3946,62 @@ class Static(object):
             if not self.te_fname:
                 raise Exception('Must provide a TE.nc file containing the high T slope of (delta a0)/a0 as te_fname.')
                    
-        self.nfile = len(self.etotal_flist)
+        if self.gsr_flist:
+            self.nfile = len(self.gsr_flist)
+        elif self.out_flists:
+            self.nfile = len(self.out_flists)
 
         self.etotal = np.empty((self.nfile))
         self.volume = np.empty((self.nfile))
+
+        self.pressure_units = pressure_units
+        self.pressure = pressure
+
+        if self.pressure_units is None:
+            raise Exception('Please specify pressure units')
+
+        if self.pressure_units == 'GPa':
+            self.pressure_gpa = self.pressure
+            self.pressure = self.pressure*cst.gpa_to_habo3
+        else:
+            self.pressure_gpa = self.pressure*cst.habo3_to_gpa
+
+        print('\nComputing at external pressure {} GPa'.format(self.pressure_gpa))
+
 
         if self.dedp:
 
             self.get_gap_energy()
             if len(self.gap_energy) != self.nfile:
-                raise Exception('{} contains {} gap values, while there are {} files in etotal_flist. '.format(self.gap_fname, len(self.gap_energy),self.nfile))
+                raise Exception('{} contains {} gap values, while there are {} files in gsr_flist. '.format(self.gap_fname, len(self.gap_energy),self.nfile))
 
-        for n, fname in enumerate(self.etotal_flist):
-            gs = GsrFile(fname)
-            self.etotal[n] = gs.etotal
-            self.volume[n] = gs.volume
+        self.get_volume_and_total_energy()
 
+
+        self.etotal = self.etotal + self.pressure*self.volume
 
         self.bulk_modulus_from_eos, self.bulk_modulus_derivative, self.equilibrium_volume, self.equilibrium_energy =  self.get_bulk_modulus()
         self.effective_pressure = self.get_effective_pressure()
 
         if self.dedp:
-            self.dedp_fit, self.dedp = self.get_dedp()
+            self.dedp_fit, self.dedp_lin = self.get_dedp()
 
         if self.estimate_gap_correction:
             self.estimate_gap_zpae()
+
+    def get_volume_and_total_energy(self):
+
+        if self.gsr_flist:
+            for n, fname in enumerate(self.gsr_flist):
+                gs = GsrFile(fname)
+                self.etotal[n] = gs.etotal
+                self.volume[n] = gs.volume
+
+        elif self.out_flists:
+            for n, fname in enumerate(self.out_flists):
+                gs = OutFile(fname)
+                self.etotal[n] = gs.etotal
+                self.volume[n] = gs.volume
 
 
     def get_bulk_modulus(self):
@@ -3967,12 +4016,16 @@ class Static(object):
             popt,pcov = curve_fit(eos.murnaghan_EV, self.volume, self.etotal, p0)  
 
         if self.static_plot:
+            import matplotlib.pyplot as plt
+            import matplotlib
+            matplotlib.use('Qt5Agg') # for home
+
             plt.plot(self.volume,self.etotal,'ok',linestyle='None',label='data')
             xfit = np.linspace(0.90*self.volume[0], 1.10*self.volume[-1],200)
             yfit = eos.murnaghan_EV(xfit, popt[0],popt[1],popt[2],popt[3])
             plt.plot(xfit,yfit,label='fit')
 
-            plt.xlabel('Unit cell volume (bohr^3)')
+            plt.xlabel(r'Unit cell volume (bohr$^3$)')
             plt.ylabel('Total energy (Ha)')
             plt.legend(numpoints=1)
             plt.title('Murnaghan EOS')
@@ -4003,11 +4056,11 @@ class Static(object):
         # find which pressure is closer to zero. Make the linear fit with neighboring data
         # This will have to be given in terms of number of lattice parameters...
         # Use the full volumes for EOS fitting, then loop for the gaps, or think of something
-        pdata = self.effective_pressure_from_eos
+        pdata = self.effective_pressure
         p0 = np.abs(pdata).argmin()
 
-        # This is the original version, just a linear fit...
-        fit = np.polyfit(pdata[p0-1:p0+2], self.gap_energy[p0-1:p0+2],1)
+        # This is the original version, just a linear fit of the 2 neighboring points...
+        fit = np.ma.polyfit(pdata[p0-1:p0+2], self.gap_energy[p0-1:p0+2],1)
 
         dedp = fit[0]
         print('From linear fit')
@@ -4016,22 +4069,30 @@ class Static(object):
         # This is from finite difference...
         print('From FD 0.5%')
         print('psteps = {}, {}'.format(pdata[p0-1]-pdata[p0], pdata[p0]-pdata[p0+1]))
-        self.dedp_fd = (self.gap_energy[p0+1] - self.gap_energy[p0-1])/(pdata[p0+1]-pdata[p0-1])
-        print('dedp  = {} meV/GPa'.format(dedp_fd*cst.ha_to_ev*1000/cst.habo3_to_gpa))
+        self.dedp_fd05 = (self.gap_energy[p0+1] - self.gap_energy[p0-1])/(pdata[p0+1]-pdata[p0-1])
+        print('dedp  = {} meV/GPa'.format(self.dedp_fd05*cst.ha_to_ev*1000/cst.habo3_to_gpa))
 
         print('From FD 1.0%')
         print('psteps = {}, {}'.format(pdata[p0-2]-pdata[p0], pdata[p0]-pdata[p0+2]))
-        self.dedp_fd2 = (self.gap_energy[p0+2] - self.gap_energy[p0-2])/(pdata[p0+2]-pdata[p0-2])
-        print('dedp  = {} meV/GPa'.format(dedp_fd*cst.ha_to_ev*1000/cst.habo3_to_gpa))
+        self.dedp_fd1 = (self.gap_energy[p0+2] - self.gap_energy[p0-2])/(pdata[p0+2]-pdata[p0-2])
+        print('dedp  = {} meV/GPa'.format(self.dedp_fd1*cst.ha_to_ev*1000/cst.habo3_to_gpa))
 
         if self.static_plot:
+            import matplotlib.pyplot as plt
+            import matplotlib
+            matplotlib.use('Qt5Agg') # for home
 
             plt.plot(pdata*cst.habo3_to_gpa, self.gap_energy*cst.ha_to_ev,marker='s',color='k',linestyle='None',label='data')
             plt.plot(pdata[p0-1:p0+2]*cst.habo3_to_gpa,self.gap_energy[p0-1:p0+2]*cst.ha_to_ev,marker='s',color='m',linestyle='None',label='fitting data')
     
-            xfit = np.linspace(pdata[0],pdata[-1],100)
+            xfit = np.linspace(np.amin(pdata),np.amax(pdata),100)
             yfit = xfit*fit[0] + fit[1]
-            plt.plot(xfit*cst.habo3_to_gpa,yfit*cst.ha_to_ev,label='fit')
+            fit_fd05 = xfit*self.dedp_fd05 + fit[1]
+            fit_fd1 = xfit*self.dedp_fd1 + fit[1]
+
+            plt.plot(xfit*cst.habo3_to_gpa,yfit*cst.ha_to_ev,label='fit lin', color='r')
+            plt.plot(xfit*cst.habo3_to_gpa,fit_fd05*cst.ha_to_ev,label='fit 0.5%', color='b')
+            plt.plot(xfit*cst.habo3_to_gpa,fit_fd1*cst.ha_to_ev,label='fit 1%', color='g')
 
             plt.xlabel('Pressure (GPa)')
             plt.ylabel('Gap energy (eV)')
@@ -4047,25 +4108,55 @@ class Static(object):
 
     def estimate_gap_zpae(self):
 
-        if not self.gap_energy:
+        if self.gap_energy is not None:
             self.gap_energy = self.get_gap_energy()
 
-        from .tefile import set_file_class
+        from tefile import set_file_class
 
-        tefile = set_file_class(te_fname)
+        tefile = set_file_class(self.te_fname)
         # the slope variable will be of dimension (nacell, 1)
         slope = tefile.delta_acell_from_high_t_slope
+        theo = ((tefile.acell[0,0]-tefile.equilibrium_volume[1])/tefile.equilibrium_volume[1])
+        print('slope', slope)
+        print('theo', theo)
 
         # see what to do if I have the bulk modulus from elastic constants... do both?
         # or give it as an input?
-        bm_from_elastic = tefile.bulk_modulus_from_elastic
-        if bm_elastic is not None:
+        self.bulk_modulus_from_elastic = tefile.bulk_modulus_from_elastic*cst.gpa_to_habo3
+
+        if self.bulk_modulus_from_elastic is not None:
             # compute formula with this B0
-            self.zp_gap_elast = -self.bulk_modulus_from_elastic * self.dedp * slope
+            if self.symmetry == 'cubic':
+                # dV/V0 = 3*da/a0 for cubic symmetry
+                self.zp_gap_elast_fd05 = -self.bulk_modulus_from_elastic * self.dedp_fd05 * 3*slope
+                self.zp_gap_elast_fd1 = -self.bulk_modulus_from_elastic * self.dedp_fd1 * 3*slope
+                self.zp_gap_elast_lin = -self.bulk_modulus_from_elastic * self.dedp_lin * 3*slope
+                self.zp_gap_elast_fd05_data = -self.bulk_modulus_from_elastic * self.dedp_fd05 * 3*theo
+
+
+                print('From elastic : ')
+                print('linfit: {} meV'.format(- self.bulk_modulus_from_elastic*self.dedp_lin*3*slope*cst.ha_to_ev*1E3))
+                print('fd 0.5%: {} meV'.format(-self.bulk_modulus_from_elastic * self.dedp_fd05*3*slope *cst.ha_to_ev*1E3))
+                print('fd 1%: {} meV'.format(-self.bulk_modulus_from_elastic * self.dedp_fd1*3*slope *cst.ha_to_ev*1E3))
+                print('fd 0.5% from data: {} meV'.format(-self.bulk_modulus_from_elastic * self.dedp_fd05*3*theo *cst.ha_to_ev*1E3))
+                print('da/a0 intersect', slope)
+                print('BM', self.bulk_modulus_from_elastic*cst.habo3_to_gpa)
 
 
         # Compute also with the one from eos
-        self.zp_gap_eos = -self.bulk_modulus_from_eos * self.dedp * slope
+        if self.symmetry == 'cubic':
+            self.zp_gap_eos_fd05 = -self.bulk_modulus_from_eos * self.dedp_fd05 * 3*slope
+            self.zp_gap_eos_fd1 = -self.bulk_modulus_from_eos * self.dedp_fd1 * 3*slope
+            self.zp_gap_eos_lin = -self.bulk_modulus_from_eos * self.dedp_lin * 3*slope
+            self.zp_gap_eos_fd05_data = -self.bulk_modulus_from_eos * self.dedp_fd05 * 3*theo
+
+            print('From EOS : ')
+            print('linfit: {} meV'.format(self.zp_gap_eos_lin*cst.ha_to_ev*1E3))
+            print('fd05 0.5%: {} meV'.format(-self.bulk_modulus_from_eos * self.dedp_fd05*3*slope *cst.ha_to_ev*1E3))
+            print('fd 1%: {} meV'.format(-self.bulk_modulus_from_eos * self.dedp_fd1*3*slope *cst.ha_to_ev*1E3))
+            print('fd 0.5% from data: {} meV'.format(-self.bulk_modulus_from_eos * self.dedp_fd05*3*theo *cst.ha_to_ev*1E3))
+            print('da/a0 intersect', slope)
+            print('BM', self.bulk_modulus_from_eos*cst.habo3_to_gpa)
 
 
     def get_gap_energy(self):
@@ -4074,7 +4165,7 @@ class Static(object):
             self.gap_energy = np.ma.zeros(len(self.eig_flist))
 
             for i, fname in enumerate(self.eig_flist):
-                if fname is not 'None':
+                if fname != 'None':
                     eig = EIGfile(fname=fname)
                     eig.read_nc()
                     self.gap_energy[i] = eig.get_gap_energy(self.valence)
@@ -4097,10 +4188,27 @@ class Static(object):
             f.write('Static lattice properties, from Murnaghan equation of state\n\n')
             f.write('{:<35s} : {:>12.4f} bohr^3\n'.format('Equilibrium volume',self.equilibrium_volume))
             f.write('{:<35s} : {:>12.4f} eV\n'.format('Equilibrium energy',self.equilibrium_energy*cst.ha_to_ev))
-            f.write('{:<35s} : {:>12.4f} GPa\n'.format('Bulk modulus',self.bulk_modulus_from_eos*cst.habo3_to_gpa))
-            f.write('{:<35s} : {:>12.4f}\n'.format('Bulk modulus pressure derivative',self.bulk_modulus_derivative))
-            f.write('{:<35s} : {:>12.4f} meV/GPa\n'.format('dEgap/dP (P=0)', self.dedp*cst.ha_to_ev*1000/cst.habo3_to_gpa))
+            f.write('{:<35s} : {:>12.4f} GPa\n'.format('Bulk modulus from EOS',self.bulk_modulus_from_eos*cst.habo3_to_gpa))
+            if self.bulk_modulus_from_elastic is not None:
+                f.write('{:<35s} : {:>12.4f} GPa\n'.format('Bulk modulus from elastic',float(self.bulk_modulus_from_eos*cst.habo3_to_gpa)))
 
+            f.write('{:<35s} : {:>12.4f}\n'.format('Bulk modulus pressure derivative',self.bulk_modulus_derivative))
+
+            if self.dedp:
+                f.write('\n{:<35s} : {:>12.4f} meV/GPa\n'.format('dEgap/dP (P=0), linfit', float(self.dedp_lin*cst.ha_to_ev*1000/cst.habo3_to_gpa)))
+                f.write('{:<35s} : {:>12.4f} meV/GPa\n'.format('dEgap/dP (P=0), fd 0.5%', float(self.dedp_fd05*cst.ha_to_ev*1000/cst.habo3_to_gpa)))
+                f.write('{:<35s} : {:>12.4f} meV/GPa\n'.format('dEgap/dP (P=0), fd 1%', float(self.dedp_fd1*cst.ha_to_ev*1000/cst.habo3_to_gpa)))
+            if self.estimate_gap_correction:
+                f.write('\n{:<35s} : {:>12.4f} meV\n'.format('Gap ZPAE, linfit-eos', float(self.zp_gap_eos_lin*cst.ha_to_ev*1E3)))
+                f.write('{:<35s} : {:>12.4f} meV\n'.format('Gap ZPAE, fd 0.5%-eos', float(self.zp_gap_eos_fd05*cst.ha_to_ev*1E3)))
+                f.write('{:<35s} : {:>12.4f} meV\n'.format('Gap ZPAE, fd 1%-eos', float(self.zp_gap_eos_fd1*cst.ha_to_ev*1E3)))
+                f.write('{:<35s} : {:>12.4f} meV\n'.format('Gap ZPAE, fd 0.5%-eos from data', float(self.zp_gap_eos_fd05_data*cst.ha_to_ev*1E3)))
+
+                if self.bulk_modulus_from_elastic is not None:
+                    f.write('{:<35s} : {:>12.4f} meV\n'.format('Gap ZPAE, linfit-elast', float(self.zp_gap_elast_lin*cst.ha_to_ev*1E3)))
+                    f.write('{:<35s} : {:>12.4f} meV\n'.format('Gap ZPAE, fd 0.5%-elast', float(self.zp_gap_elast_fd05*cst.ha_to_ev*1E3)))
+                    f.write('{:<35s} : {:>12.4f} meV\n'.format('Gap ZPAE, fd 1%-elast', float(self.zp_gap_elast_fd1*cst.ha_to_ev*1E3)))
+                f.write('{:<35s} : {:>12.4f} meV\n'.format('Gap ZPAE, fd 0.5%-elast from data', float(self.zp_gap_elast_fd05_data*cst.ha_to_ev*1E3)))
         f.close()
 
     def write_netcdf(self):
@@ -4127,6 +4235,11 @@ class Static(object):
             data[:] = self.bulk_modulus_from_eos*cst.habo3_to_gpa
             data.units = 'GPa'
 
+            data = dts.createVariable('bulk_modulus_from_elastic','d',('one'))
+            if self.bulk_modulus_from_elastic is not None:
+                data[:] = self.bulk_modulus_from_elastic*cst.habo3_to_gpa
+            data.units = 'GPa'
+
             data = dts.createVariable('bulk_modulus_derivative','d',('one'))
             data[:] = self.bulk_modulus_derivative
             data.units = 'None'
@@ -4149,15 +4262,23 @@ class Static(object):
 
             data = dts.createVariable('dE_dP','d',('one'))
             if self.dedp:
-                data[:] = self.dedp*cst.ha_to_ev*1000/cst.habo3_to_gpa
+                data[:] = self.dedp_fd05*cst.ha_to_ev*1000/cst.habo3_to_gpa
                 data.units = 'meV/GPa'
 
-            data = dts.createVariable('dedp_fit','d',('two'))
-            if self.dedp:
-                self.dedp_fit[0] = self.dedp_fit[0]/cst.habo3_to_gpa
-                data[:] = self.dedp_fit
-                data.units = 'hartree/GPa, hartree'            
+#            data = dts.createVariable('dedp_fit','d',('two'))
+#            if self.dedp:
+#                self.dedp_fit[0] = self.dedp_fit[0]/cst.habo3_to_gpa
+#                data[:] = self.dedp_fit
+#                data.units = 'hartree/GPa, hartree'            
+            data = dts.createVariable('gap_zpae_estimation', 'd', ('one'))
+            if self.estimate_gap_correction:
+                data[:] = self.zp_gap_eos_fd05
+                data.units = 'Hartree'
 
+            data = dts.createVariable('gap_zpae_estimation_from_data', 'd', ('one'))
+            if self.estimate_gap_correction:
+                data[:] = self.zp_gap_eos_fd05_data
+                data.units = 'Hartree'
 
 ############################################################
 # Also, split this into different files?
@@ -4179,7 +4300,7 @@ def compute(
         out_flists = None,
         thermo_flist = None,
         elastic_fname = None,
-        etotal_flist = None,
+        gsr_flist = None,
         gap_fname = None,
         eig_flist = None,
         valence = None,
@@ -4208,6 +4329,7 @@ def compute(
         gruneisen = False,
         gruneisen_path = False,
         bulkmodulus = False,
+        static = False,
         dedp = False,
         estimate_gap_correction = False,
         initial_params = None,
@@ -4226,13 +4348,16 @@ def compute(
                     rootname = rootname,
                     symmetry = symmetry,
                     
-                    etotal_flist = etotal_flist,
+                    gsr_flist = gsr_flist,
+                    out_flists = out_flists,
                     gap_fname = gap_fname,
                     eig_flist = eig_flist,
             
                     dedp = dedp,
                     initial_params = initial_params,
 
+                    pressure = pressure,
+                    pressure_units = pressure_units,
 
                     estimate_gap_correction = estimate_gap_correction,
                     valence = valence,
