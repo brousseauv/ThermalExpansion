@@ -24,7 +24,7 @@ from expfile import EXPfile
 from eigfile import EIGfile
 import eos as eos
 import lmfit as lmfit
-
+import PyQt5
 from matplotlib import rc
 rc('text', usetex = True)
 rc('font', family = 'sans-serif', weight = 'bold')
@@ -896,7 +896,6 @@ class GibbsFreeEnergy(FreeEnergy):
         self.ntemp = len(self.temperature) 
         self.tmin_slope = tmin_slope
 
-
         if not bulk_modulus:
             raise Exception('Must provide an estimate of the bulk modulus and specify its units, in GPa or Ha/bohr^3')
         if bulk_modulus is not None:
@@ -1002,7 +1001,7 @@ class GibbsFreeEnergy(FreeEnergy):
                 # diagonalize the dynamical matrix and get the eigenfrequencies
                 if is_gamma:
                     ddb.compute_dynmat(asr=True)
-                    print('Qpt is Gamma')
+                    print('Qpt is Gamma, up to 3 negative frequencies may occur.')
                 else:
                     ddb.compute_dynmat()
                         ##### CHECK WITH GABRIEL IF I SHOULD HAVE LOTO SPLITTING AT GAMMA (WHERE DOES HIS CODE TREAT THE ELECTRIC FIELD PERTURBAITON IN THE DDB AT GAMMA???)
@@ -1092,6 +1091,7 @@ class GibbsFreeEnergy(FreeEnergy):
             fit = np.zeros((2,self.ntemp))
             self.volumic_fit_params = np.zeros((4,self.ntemp)) # [ [V0,E0,B0, B0'],T]
             self.c_over_a = np.zeros((self.ntemp))
+            self.temperature_dependent_volume = np.zeros((self.ntemp))
 #            self.fit_params = np.zeros((5,self.ntemp)) # defined in self.fit_params_list
 
             # Define EOS type, for volumic fit
@@ -1130,7 +1130,9 @@ class GibbsFreeEnergy(FreeEnergy):
                 if t == 0:
                     print('Zero-point volume change: {:>8.4f} Bohr^3'.format(popt[0]-self.equilibrium_volume[0]))
 
+                self.temperature_dependent_volume[t] = popt[0]
 
+                ########## 2D Free Energy surface minimization
                 #Free energy surface 2D fit
                 if self.use_axial_eos:
 
@@ -1265,7 +1267,6 @@ class GibbsFreeEnergy(FreeEnergy):
                     self.fit_params[4,t] = lmfit_result_ell.params['E'].value
                     self.fit_params[5,t] = lmfit_result_ell.params['F'].value
 
-                
             print('########### T=0 K')
             print('delta a = {:>7.4f} bohr, delta a/a0 stat = {:>6.4f}%'.format((fit[0,0]-self.equilibrium_volume[1]).round(4), (fit[0,0]-self.equilibrium_volume[1]).round(4)/self.equilibrium_volume[1].round(4)*100))
             print('delta c = {:>7.4f} bohr, delta c/c0 stat = {:>6.4f}%'.format((fit[1,0]-self.equilibrium_volume[3]).round(4), (fit[1,0]-self.equilibrium_volume[3]).round(4)/self.equilibrium_volume[3].round(4)*100))
@@ -1276,6 +1277,7 @@ class GibbsFreeEnergy(FreeEnergy):
             print('stat: c={}, a={}, c/a={}'.format(self.equilibrium_volume[3], self.equilibrium_volume[1], self.equilibrium_volume[3]/self.equilibrium_volume[1]))
             print('ZPAE: c={}, a={}, c/a={}'.format(fit[1,0], fit[0,0], fit[1,0]/fit[0,0]))
             return fit
+
 
 #    def residuals(self,params,x,y,z):
 #
@@ -1592,6 +1594,372 @@ class GibbsFreeEnergy(FreeEnergy):
 
                 f.close()
 
+class GibbsVolumicFreeEnergy(FreeEnergy):
+
+    #Input files
+    ddb_flists = None
+    out_flists = None
+
+    #Parameters
+    wtq_list = None
+    wtq_ncfile = None
+    temperature = None
+
+    check_anaddb = False
+    equilibrium_index = None
+
+    def __init__(self,
+
+        rootname,
+        units,
+        symmetry,
+
+        ddb_flists = None,
+        out_flists = None,
+
+        wtq_list = None,
+        wtq_ncfile = None,
+        temperature = np.arange(0,300,50),
+        tmin_slope = 700,
+
+        check_anaddb = False,
+
+        bulk_modulus = None,
+        bulk_modulus_units = None,
+        pressure = 0.0,
+        pressure_units = None,
+
+        equilibrium_index = None,
+        manual_correction = False,
+
+        eos_type = 'Murnaghan',
+
+        **kwargs):
+
+
+        print('Thermal expansion via Gibbs free energy')
+        if not ddb_flists:
+            raise Exception('Must provide a list of files for ddb_flists')
+        if not out_flists:
+            raise Exception('Must provide a list of files for out_flists')        
+
+        if len(out_flists) != np.shape(ddb_flists)[0]:
+            raise Exception('ddb_flists and out_flists must have the same number of volumes,but ddb_flists has {} and out_flist has {}'.format(np.shape(ddb_flists)[0],len(out_flists)))
+
+
+        #Set input files
+        self.ddb_flists = ddb_flists
+        self.out_flists = out_flists
+        self.symmetry = symmetry
+
+        if not self.symmetry:
+            raise Exception('Symmetry type must be specified')
+
+        super(GibbsVolumicFreeEnergy,self).__init__(rootname,units)
+        self.check_anaddb = check_anaddb
+
+        self.equilibrium_index = equilibrium_index  #Transfer to Python indexing
+        if self.equilibrium_index is None:
+            raise Exception('Must provide the equilibrium volume index in volume list (Index starting at 1)')
+        
+        if self.verbose:
+            print('Equilibrium data is the {} volume in list'.format(self.equilibrium_index))
+        self.equilibrium_index -= 1
+
+        self.temperature = temperature
+        self.ntemp = len(self.temperature) 
+
+        if not bulk_modulus:
+            raise Exception('Must provide an estimate of the bulk modulus and specify its units, in GPa or Ha/bohr^3')
+        if bulk_modulus is not None:
+            if bulk_modulus_units == 'GPa':
+                self.bulk_modulus = bulk_modulus*cst.gpa_to_habo3
+            elif bulk_modulus_units == 'HaBo3':
+                self.bulk_modulus = bulk_modulus
+            else:
+                raise Exception('Bulk modulus units must be GPa or Ha/bohr^3')
+        self.pressure_units = pressure_units
+        self.pressure = pressure
+
+        if self.pressure_units == 'None':
+            raise Exception('Please specify pressure units')
+
+        if self.pressure_units == 'GPa':
+            self.pressure_gpa = self.pressure
+            self.pressure = self.pressure*cst.gpa_to_habo3
+        else:
+            self.pressure_gpa = self.pressure*cst.habo3_to_gpa
+
+        print('\nComputing at external pressure {} GPa'.format(self.pressure_gpa))
+
+        #Define EOS type
+        self.eos_type = eos_type
+        if self.eos_type not in self.eos_list:
+            raise Exception('EOS type must be one of the following: {}'.format(self.eos_list))
+
+
+        # set parameter space dimensions
+        nvol, nqpt = np.shape(self.ddb_flists)
+        self.free_energy = np.zeros((nvol,self.ntemp))
+        self.static_energy = np.zeros_like(self.free_energy)
+        self.phonon_free_energy = np.zeros_like(self.free_energy)
+
+        #Store reduced coordinates of qpoints
+        self.qred = np.zeros((nqpt,3))
+
+        self.volume = np.empty((nvol,4)) # 1st index = data index, 2nd index : total cell volume, (a1,a2,a3)
+
+        # Check that weights have been provided
+        if not wtq_list and not wtq_ncfile:
+            raise Exception('The qpoint weights should be provided, either as wtq_list or wtq_ncfile.')
+
+        if wtq_list and wtq_ncfile:
+            raise Exception('Please provide only one of wtq_list or wtq_ncfile for qpoint weights.')
+
+        if wtq_list:
+            self.set_weights_from_list(wtq_list)
+        elif wtq_ncfile:
+            self.set_weights_from_ncfile(wtq_ncfile)
+
+        # Check that all qpt lists have the same lenght, and that it is equal to the number of wtq
+        for v in range(nvol):
+            if len(ddb_flists[v][:]) != len(self.wtq):
+                raise Exception('all ddb lists must have the same number of files, and this number should be equal to the number of qpt weights')
+
+
+        # Loop on all volumes
+        for v in range(nvol):
+
+            print('\n\nReading data from {}'.format(self.out_flists[v]))
+
+           # Open OUTfile
+            gs = OutFile(out_flists[v])
+            self.volume[v,0] = gs.volume
+            self.volume[v,1:] = gs.acell
+
+            # check how many lattice parameters are unequivalent
+            # This will need to be checked if I want a more general formulation, as for tetragonal systems,
+            # the angles may change too if the cell is primitive and not cartesian...
+            if v == 0:  
+                self.distinct_acell = self.reduce_acell(self.volume[v,1:])
+                nmode = 3*gs.natom
+                self.natom = gs.natom
+                self.omega = np.zeros((nvol,nqpt,nmode))
+
+            if v == self.equilibrium_index:
+                self.equilibrium_volume = self.volume[v,:]
+
+            # get E
+            E = gs.etotal[0]
+
+            # initialize F_0, F_T 
+            F_0 = 0.
+            F_T = np.zeros((self.ntemp))
+
+            # Add electronic entropy term, maybe later
+
+            # for each qpt:
+            for i in range(nqpt):
+
+                # open the ddb file
+                ddb = DdbFile(self.ddb_flists[v][i])
+                if  v==0:
+                    self.qred[i,:] = ddb.qred
+                #nmode = 3*ddb.natom
+
+                # Check if qpt is Gamma
+                is_gamma = ddb.is_gamma
+
+                # diagonalize the dynamical matrix and get the eigenfrequencies
+                if is_gamma:
+                    ddb.compute_dynmat(asr=True)
+                    print('Qpt is Gamma, up to 3 negative frequencies may occur.')
+                else:
+                    ddb.compute_dynmat()
+                        ##### CHECK WITH GABRIEL IF I SHOULD HAVE LOTO SPLITTING AT GAMMA (WHERE DOES HIS CODE TREAT THE ELECTRIC FIELD PERTURBAITON IN THE DDB AT GAMMA???)
+
+
+                # Store frequencies
+                self.omega[v,i,:] = ddb.omega
+
+                # get F0 contribution
+                F_0 += self.wtq[i]*self.get_f0(ddb.omega) 
+                # get Ftherm contribution
+                F_T += self.wtq[i]*self.get_fthermal(ddb.omega,nmode)
+                
+            # Sum free energy = E + F_0 + F_T + PV
+            self.free_energy[v,:] = (E+F_0)*np.ones((self.ntemp)) + F_T + self.pressure*self.volume[v,0]*np.ones((self.ntemp))
+            self.static_energy[v,:] = E*np.ones((self.ntemp)) + self.pressure*self.volume[v,0]*np.ones((self.ntemp))
+            self.phonon_free_energy[v,:] = F_0*np.ones((self.ntemp)) + F_T
+
+        if self.check_anaddb:
+            # Convert results in J/mol-cell, to compare with anaddb output
+            self.ha2molc(F_0,F_T,v)
+
+
+        # For sanity checks, the following sort the datasets by increasing free energy. 
+        if self.verbose:
+            for t,T in enumerate(self.temperature):
+                print('for T = {}K:'.format(T))
+                print('minimal free energy value has index {}'.format(np.argmin(self.free_energy[:,t])))
+                sort = self.free_energy[:,t].argsort()
+                print('sorted order: {}'.format(sort))
+                print('delta min:{}'.format(self.free_energy[sort[1],t]-self.free_energy[sort[0],t]))
+
+
+        # Minimize F, according to crystal symmetry
+        # The fitting parameters will be stored in the output file, so that the fitting can be plotted afterwards.
+        self.temperature_dependent_volume = self.minimize_free_energy()
+
+    def minimize_free_energy(self):
+
+        if self.symmetry == 'cubic':
+
+            raise Exception("""For cubic systems, you will get more information from the regular Gibbs FE calculation. Set
+            volume_gibbs_only = True.""")
+
+        if self.symmetry == 'hexagonal':
+
+            fit = np.zeros((self.ntemp))
+            self.volumic_fit_params = np.zeros((4,self.ntemp)) # [ [V0,E0,B0, B0'],T]
+#            self.fit_params = np.zeros((5,self.ntemp)) # defined in self.fit_params_list
+
+            # Define EOS type, for volumic fit
+            if self.eos_type == 'Murnaghan':
+                myeos = eos.murnaghan_EV
+            if self.eos_type == 'Birch-Murnaghan':
+                myeos = eos.birch_murnaghan_EV
+
+            bounds = [[0.95*self.equilibrium_volume[0],1.08*self.static_energy[self.equilibrium_index,0],0.1*self.bulk_modulus,0.],
+                            [1.08*self.equilibrium_volume[0],0.95*self.static_energy[self.equilibrium_index,0],5*self.bulk_modulus,50.]]
+            p0 = [self.equilibrium_volume[0], self.static_energy[self.equilibrium_index,0],self.bulk_modulus,4.0]
+            popt, pcov= curve_fit(myeos, self.volume[:,0], self.static_energy[:,0], p0,bounds=bounds)
+            self.static_volumic_fit_params = popt
+
+            for t,T in enumerate(self.temperature):
+
+                # define bounds for optimal parameters
+                bounds = [[0.95*self.equilibrium_volume[0],1.08*self.free_energy[self.equilibrium_index,t],0.1*self.bulk_modulus,0.],
+                                [1.08*self.equilibrium_volume[0],0.95*self.free_energy[self.equilibrium_index,t],5*self.bulk_modulus,50.]]
+     
+                #print('\n\n########## For T = {} K #####################\n'.format(T))
+
+                # Fit volume with EOS
+                '''FIX ME could also be done with lmfit...'''
+                p0 = [self.equilibrium_volume[0], self.free_energy[self.equilibrium_index,t],self.bulk_modulus,4.0]
+                popt, pcov= curve_fit(myeos, self.volume[:,0], self.free_energy[:,t], p0,bounds=bounds)
+                self.volumic_fit_params[:,t] = popt
+                if self.verbose:
+                    print('From volumic EOS fit:')
+                    print("  K0={} GPa,K0'={}".format(popt[2]/cst.gpa_to_habo3,popt[3]))
+
+                if t == 0:
+                    print('Zero-point volume change: {:>8.4f} Bohr^3'.format(popt[0]-self.equilibrium_volume[0]))
+
+                fit[t] = popt[0]
+
+            return fit
+
+
+    def write_nc(self):
+
+        nc_outfile = 'OUT/{}_TE.nc'.format(self.rootname)
+
+        #  Write output in netCDF format
+        create_directory(nc_outfile)
+
+        with nc.Dataset(nc_outfile, 'w') as dts:
+
+            #Define the type of calculation:
+            dts.description = 'VolumicFreeEnergy'
+
+            dts.createDimension('number_of_temperatures', self.ntemp)
+            dts.createDimension('number_of_lattice_parameters', len(self.distinct_acell))
+            dts.createDimension('number_of_volumes', np.shape(self.free_energy)[0])
+            dts.createDimension('four', 4)
+            dts.createDimension('one', 1)
+            dts.createDimension('number_of_fit_parameters', np.shape(self.volumic_fit_params)[0])
+
+            data = dts.createVariable('temperature','d', ('number_of_temperatures'))
+            data[:] = self.temperature[:]
+            data.units = 'Kelvin'
+
+
+            data = dts.createVariable('volume_from_gibbs','d',('number_of_temperatures'))
+            data[:] = self.temperature_dependent_volume[:]
+            data.units = 'Bohr radius^3'
+
+
+            data = dts.createVariable('free_energy', 'd', ('number_of_volumes', 'number_of_temperatures'))
+            data[:,:] = self.free_energy[:,:]
+            data.units = 'hartree'
+
+            # FIX ME this makes no sense to have a temperature dependence!!
+            data = dts.createVariable('static_energy', 'd', ('number_of_volumes', 'number_of_temperatures'))
+            data[:,:] = self.static_energy[:,:]
+            data.units = 'hartree'
+
+            data = dts.createVariable('phonon_free_energy', 'd', ('number_of_volumes', 'number_of_temperatures'))
+            data[:,:] = self.phonon_free_energy[:,:]
+            data.units = 'hartree'
+
+            data = dts.createVariable('volume','d', ('number_of_volumes','four'))
+            data[:,:] = self.volume[:,:]
+            data.units = 'bohr^3'
+
+            data = dts.createVariable('equilibrium_volume','d', ('four'))
+            data[:] = self.equilibrium_volume[:]
+            data.units = 'bohr^3'
+
+            data = dts.createVariable('static_fit_parameters', 'd', ('number_of_fit_parameters'))
+            if self.symmetry == 'cubic':
+                data[:] = self.static_fit_params[:]
+                data.units = self.fit_params_list
+                data.description = self.eos_type
+
+            data = dts.createVariable('volumic_fit_parameters', 'd', ('four','number_of_temperatures'))
+            if self.symmetry == 'hexagonal':
+                data[:,:] = self.volumic_fit_params[:,:]
+                data.units = "V0,E0,B0,B0p"
+                data.description = self.eos_type
+
+            data = dts.createVariable('static_volumic_fit_parameters', 'd', ('four'))
+            if self.symmetry == 'hexagonal':
+                data[:] = self.static_volumic_fit_params[:]
+                data.units = "V0,E0,B0,B0p"
+                data.description = self.eos_type
+
+
+    def write_acell(self):
+
+        # Write results from Free energy minimisation in ascii format
+        outfile = 'OUT/{}_volume_from_eos.dat'.format(self.rootname)
+        create_directory(outfile)
+
+        with open(outfile, 'w') as f:
+
+            eos_str = self.eos_type
+                    
+            f.write('Temperature dependent volume via Gibbs free energy, using {} EOS\n\n'.format(eos_str))
+
+
+            if self.symmetry == 'hexagonal':
+
+                f.write('{:<12}    {:<12}\n'.format('Temperature','V (bohr^3)'))
+                for t,T in enumerate(self.temperature):
+                    f.write('{:>12.8f}    {:>12.8f}\n'.format(T,self.temperature_dependent_volume[t]))
+
+                # Independent fit: fitg, 2D fit: fit2dg
+#                f.write('\n\nTemperature dependent lattice parameters via Gibbs free energy\n\n')
+#                f.write('{:12}      {:<12}    {:<12}\n'.format('Temperature','a (bohr)','c (bohr)'))
+#                for t,T in enumerate(self.temperature):
+ #                   f.write('{:>8.1f} K    {:>12.8f}    {:>12.8f}\n'.format(T,self.fitg[0,t],self.fitg[1,t]))
+
+
+
+                f.close()
+
+
 
 class Gruneisen(FreeEnergy):
 
@@ -1772,7 +2140,7 @@ class Gruneisen(FreeEnergy):
                 # diagonalize the dynamical matrix and get the eigenfrequencies
                 if is_gamma:
                     ddb.compute_dynmat(asr=True)
-                    print('Qpt is Gamma')
+                    print('Qpt is Gamma, up to 3 negative frequencies may occur.')
                 else:
                     ddb.compute_dynmat()
                         ##### CHECK WITH GABRIEL IF I SHOULD HAVE LOTO SPLITTING AT GAMMA (WHERE DOES HIS CODE TREAT THE ELECTRIC FIELD PERTURBAITON IN THE DDB AT GAMMA???)
@@ -3901,6 +4269,7 @@ class Static(object):
             pressure_units = None,
 
             static_plot = False,
+            bulk_modulus_from_elastic = None,
 
             **kwargs):
 
@@ -4080,8 +4449,8 @@ class Static(object):
         if self.static_plot:
             import matplotlib.pyplot as plt
             import matplotlib
-            matplotlib.use('Qt5Agg') # for home
-
+            #matplotlib.use('Qt5Agg') # for home
+            matplotlib.use('TKAgg') # for cluster
             plt.plot(pdata*cst.habo3_to_gpa, self.gap_energy*cst.ha_to_ev,marker='s',color='k',linestyle='None',label='data')
             plt.plot(pdata[p0-1:p0+2]*cst.habo3_to_gpa,self.gap_energy[p0-1:p0+2]*cst.ha_to_ev,marker='s',color='m',linestyle='None',label='fitting data')
     
@@ -4328,6 +4697,7 @@ def compute(
         expansion = True,
         gruneisen = False,
         gruneisen_path = False,
+        volume_minimization_only = False,
         bulkmodulus = False,
         static = False,
         dedp = False,
@@ -4403,32 +4773,57 @@ def compute(
     if expansion:
     ## ADD OPTIONS, TO MINIMIZE FREE ENERGY OR USE GRUNEISEN PARAMETERS
         if gibbs:
-            calc = GibbsFreeEnergy(
-                    out_flists = out_flists, 
-                    ddb_flists = ddb_flists,
+            if volume_minimization_only:
+                calc = GibbsVolumicFreeEnergy(
+                        out_flists = out_flists, 
+                        ddb_flists = ddb_flists,
+            
+                        rootname = rootname,
+                        symmetry = symmetry,
+            
+                        wtq_list = wtq_list,
+                        wtq_ncfile = wtq_ncfile,
+                        temperature = temperature,
+                        units = units,
+                        check_anaddb = check_anaddb,
+    ## FIX ME : IF THERE WAS DATA FOR BULK MODULUS, USE IT!! OR, SIMPLY COMPUTE IT FROM DDB VOLUME DATA...                    
+                        bulk_modulus = bulk_modulus,
+                        bulk_modulus_units = bulk_modulus_units,
         
-                    rootname = rootname,
-                    symmetry = symmetry,
+                        equilibrium_index = equilibrium_index,
+                        verbose = verbose,
+                        pressure = pressure,
+                        pressure_units = pressure_units,
+                        eos_type = eos_type,
+                        manual_correction = manual_correction, # should be removed...
+                        **kwargs)
+            else:
+                calc = GibbsFreeEnergy(
+                        out_flists = out_flists, 
+                        ddb_flists = ddb_flists,
+            
+                        rootname = rootname,
+                        symmetry = symmetry,
+            
+                        wtq_list = wtq_list,
+                        wtq_ncfile = wtq_ncfile,
+                        temperature = temperature,
+                        units = units,
+                        check_anaddb = check_anaddb,
+    ## FIX ME : IF THERE WAS DATA FOR BULK MODULUS, USE IT!! OR, SIMPLY COMPUTE IT FROM DDB VOLUME DATA...                    
+                        bulk_modulus = bulk_modulus,
+                        bulk_modulus_units = bulk_modulus_units,
+                        tmin_slope = tmin_slope,
         
-                    wtq_list = wtq_list,
-                    wtq_ncfile = wtq_ncfile,
-                    temperature = temperature,
-                    units = units,
-                    check_anaddb = check_anaddb,
-## FIX ME : IF THERE WAS DATA FOR BULK MODULUS, USE IT!! OR, SIMPLY COMPUTE IT FROM DDB VOLUME DATA...                    
-                    bulk_modulus = bulk_modulus,
-                    bulk_modulus_units = bulk_modulus_units,
-                    tmin_slope = tmin_slope,
-    
-                    equilibrium_index = equilibrium_index,
-                    verbose = verbose,
-                    pressure = pressure,
-                    pressure_units = pressure_units,
-                    eos_type = eos_type,
-                    use_axial_eos = use_axial_eos,
-                    manual_correction = manual_correction, # should be removed...
-                    **kwargs)
-     
+                        equilibrium_index = equilibrium_index,
+                        verbose = verbose,
+                        pressure = pressure,
+                        pressure_units = pressure_units,
+                        eos_type = eos_type,
+                        use_axial_eos = use_axial_eos,
+                        manual_correction = manual_correction, # should be removed...
+                        **kwargs)
+
         elif gruneisen:
             calc = Gruneisen(
                     out_flists = out_flists, 
