@@ -1240,21 +1240,22 @@ class GibbsFreeEnergy(FreeEnergy):
                     if self.verbose:
                         print(lmfit_result_ell.fit_report())
 
-                    if t==0:
-                        print('From ellipsoid')
-                        A = lmfit_result_ell.params['A'].value
-                        B = lmfit_result_ell.params['B'].value
-                        C = lmfit_result_ell.params['C'].value
-                        D = lmfit_result_ell.params['D'].value
-                        E = lmfit_result_ell.params['E'].value
+                    A = lmfit_result_ell.params['A'].value
+                    B = lmfit_result_ell.params['B'].value
+                    C = lmfit_result_ell.params['C'].value
+                    D = lmfit_result_ell.params['D'].value
+                    E = lmfit_result_ell.params['E'].value
 
 
-                        a0 = (B*E-2*C*D)/(4*A*C-B**2)
-                        c0 = -1./B*(2*A*a0+D)
-                        print('a0={:>7.4f}, delta a = {:>7.4f}'.format(a0, (a0-self.equilibrium_volume[1]).round(4)))
-                        print('c0={:>7.4f}, delta c = {:>7.4f}'.format(c0, (c0-self.equilibrium_volume[3]).round(4)))
-                        vol0 = np.sqrt(3)/2*a0**2*c0
-                        print('Volume change = {} Bohr^3'.format(vol0 - self.equilibrium_volume[0]))
+                    a0 = (B*E-2*C*D)/(4*A*C-B**2)
+                    c0 = -1./B*(2*A*a0+D)
+
+                    #if t==0:
+                    print('From ellipsoid')
+                    print('a={:>7.4f}, delta a = {:>7.4f}'.format(a0, (a0-self.equilibrium_volume[1]).round(4)))
+                    print('c={:>7.4f}, delta c = {:>7.4f}'.format(c0, (c0-self.equilibrium_volume[3]).round(4)))
+                    vol0 = np.sqrt(3)/2*a0**2*c0
+                    print('Volume change = {} Bohr^3'.format(vol0 - self.equilibrium_volume[0]))
 
 
                     fit[0,t] = a0
