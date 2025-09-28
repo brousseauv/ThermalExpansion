@@ -408,21 +408,24 @@ class Gibbs_from_anaddb(FreeEnergy):
 #                import matplotlib.pyplot as plt
 #                from mpl_toolkits.mplot3d import Axes3D
 
-            # This delta is the difference between real HGH minimum and PAW minimum, at the current pressure
-            if self.pressure_gpa==0.0:
-                delta =  [0.011000356489930141,0.0844492602578999] #for 0gpa
-            if self.pressure_gpa == 0.5:
-                delta = [0.004513105799999195,0.0239153519999995] #for 0.5gpa
-            if self.pressure_gpa == 1.0:
-                delta = [0.0,0.0] #for 1gpa
-            if self.pressure_gpa == 1.5:
-                delta = [0.0031372478999998066,0.001351464000000746] #for 1.5gpa
-            if self.pressure_gpa == 3.0:
-                delta = [0.0,0.0] #for 3gpa
-            if self.pressure_gpa == 3.5:
-                delta = [0.001538456200000482,-0.0026159529999993936] #for 3.5gpa
-            if self.pressure_gpa == 5.0:
-                delta = [0.016926552700000208,-0.0055531139999995816] #for 5gpa
+            # This delta is the lattice param difference between real HGH minimum and PAW minimum for BiTeI, at the current pressure
+            # (phonon+SOC+PAW not implemented yet)
+#            if self.pressure_gpa==0.0:
+#                delta =  [0.011000356489930141,0.0844492602578999] #for 0gpa
+#            if self.pressure_gpa == 0.5:
+#                delta = [0.004513105799999195,0.0239153519999995] #for 0.5gpa
+#            if self.pressure_gpa == 1.0:
+#                delta = [0.0,0.0] #for 1gpa
+#            if self.pressure_gpa == 1.5:
+#                delta = [0.0031372478999998066,0.001351464000000746] #for 1.5gpa
+#            if self.pressure_gpa == 3.0:
+#                delta = [0.0,0.0] #for 3gpa
+#            if self.pressure_gpa == 3.5:
+#                delta = [0.001538456200000482,-0.0026159529999993936] #for 3.5gpa
+#            if self.pressure_gpa == 5.0:
+#                delta = [0.016926552700000208,-0.0055531139999995816] #for 5gpa
+
+            delta = [0.0, 0.0]
 
 
             for t,T in enumerate(self.temperature):
@@ -449,7 +452,7 @@ class Gibbs_from_anaddb(FreeEnergy):
                 popt, pcov= curve_fit(eos.murnaghan_EV_axial, self.volume[:,0], self.free_energy[:,t], p0)
                 print('\nfor T={}K, a= {} c={}'.format(T,popt[0],popt[1]))
 
-                delta = [0.0031372478999998066,0.001351464000000746]
+                #delta = [0.0031372478999998066,0.001351464000000746]
                 # Fit only the a variation
                 p0a = [self.equilibrium_volume[0], self.free_energy[self.equilibrium_index,t], 10.0*cst.gpa_to_habo3,8.0]
                 popta, pcova= curve_fit(eos.murnaghan_EV, self.volume[:7,0], self.free_energy[:7,t], p0a,bounds=bounds_a)
@@ -855,7 +858,6 @@ class GibbsFreeEnergy(FreeEnergy):
         pressure_units = None,
 
         equilibrium_index = None,
-        manual_correction = False,
 
         eos_type = 'Murnaghan',
         use_axial_eos = False,
@@ -1631,7 +1633,6 @@ class GibbsVolumicFreeEnergy(FreeEnergy):
         pressure_units = None,
 
         equilibrium_index = None,
-        manual_correction = False,
 
         eos_type = 'Murnaghan',
 
@@ -1977,7 +1978,6 @@ class Gruneisen(FreeEnergy):
     pressure_gpa= 0.0 
 
     check_anaddb = False
-    manual_correction = False
     verbose = False
     bulk_modulus = None
 
@@ -2005,7 +2005,6 @@ class Gruneisen(FreeEnergy):
         pressure_gpa = 0.0,
         pressure_units = None,
         bulk_modulus_units = None,
-        manual_correction = False,
         verbose = False,
 
         eos_type = 'Murnaghan',
@@ -2037,7 +2036,6 @@ class Gruneisen(FreeEnergy):
 
         super(Gruneisen,self).__init__(rootname,units)
         self.check_anaddb = check_anaddb
-        self.manual_correction = manual_correction
         self.verbose = verbose
 
         self.temperature = temperature
@@ -3786,7 +3784,6 @@ class GruneisenPath(FreeEnergy):
         pressure_gpa = 0.0,
         pressure_units = None,
         bulk_modulus_units = None,
-        #manual_correction = False,
         verbose = False,
 
         #eos_type = 'Murnaghan',
@@ -3818,7 +3815,6 @@ class GruneisenPath(FreeEnergy):
 
         super(GruneisenPath,self).__init__(rootname,units)
         #self.check_anaddb = check_anaddb
-        #self.manual_correction = manual_correction
         self.verbose = verbose
 
         #self.temperature = temperature
@@ -4705,7 +4701,6 @@ def compute(
         estimate_gap_correction = False,
         initial_params = None,
         static_plot = False,
-        manual_correction = False,
         equilibrium_index = None,
         verbose = False,
 
@@ -4761,7 +4756,6 @@ def compute(
                 bulk_modulus = bulk_modulus,
                 bulk_modulus_units = bulk_modulus_units,
 
-                #manual_correction = manual_correction,
                 verbose = verbose,
 
                 #eos_type = eos_type,
@@ -4796,7 +4790,6 @@ def compute(
                         pressure = pressure,
                         pressure_units = pressure_units,
                         eos_type = eos_type,
-                        manual_correction = manual_correction, # should be removed...
                         **kwargs)
             else:
                 calc = GibbsFreeEnergy(
@@ -4822,7 +4815,6 @@ def compute(
                         pressure_units = pressure_units,
                         eos_type = eos_type,
                         use_axial_eos = use_axial_eos,
-                        manual_correction = manual_correction, # should be removed...
                         **kwargs)
 
         elif gruneisen:
@@ -4845,7 +4837,6 @@ def compute(
                     bulk_modulus = bulk_modulus,
                     bulk_modulus_units = bulk_modulus_units,
                     
-                    manual_correction = manual_correction,
                     verbose = verbose,
 
                     eos_type = eos_type,
